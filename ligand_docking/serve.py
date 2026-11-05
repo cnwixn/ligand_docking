@@ -133,8 +133,11 @@ class DockingHandler(BaseHTTPRequestHandler):
         center = _numbers(body.get("center"), "centre")
         size = _numbers(body.get("size"), "size")
         exhaustiveness = int(body.get("exhaustiveness") or 8)
+        num_modes = int(body.get("num_modes") or 9)
         if exhaustiveness < 1:
             raise ValueError("effort must be at least 1.")
+        if num_modes < 1:
+            raise ValueError("poses must be at least 1.")
         name = _safe_name(body.get("project_name") or "")
 
         run_dir = self.work_root / f"run-{uuid.uuid4().hex[:10]}"
@@ -153,14 +156,14 @@ class DockingHandler(BaseHTTPRequestHandler):
         with LOCK:
             outcome = run_vina(receptor, ligand, run_dir / "out.pdbqt",
                                center=center, size=size, exhaustiveness=exhaustiveness,
-                               vina=self.vina_path)
+                               num_modes=num_modes, vina=self.vina_path)
 
         poses = outcome["poses"]
         if not poses:
             raise ValueError("Vina produced no poses; check the box and the inputs.")
 
         project = self._save_project(name, receptor, ligand, run_dir, poses, center, size,
-                                     exhaustiveness)
+                                     exhaustiveness, num_modes)
         return {
             "ok": True,
             "project": project,
@@ -170,7 +173,7 @@ class DockingHandler(BaseHTTPRequestHandler):
         }
 
     def _save_project(self, name: str, receptor: Path, ligand: Path, run_dir: Path,
-                      poses, center, size, exhaustiveness) -> dict:
+                      poses, center, size, exhaustiveness, num_modes) -> dict:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         project_id = f"{stamp}-{uuid.uuid4().hex[:6]}"
         folder = self.projects_root / f"{project_id}-{name}"
@@ -186,6 +189,7 @@ class DockingHandler(BaseHTTPRequestHandler):
             "center": list(center),
             "size": list(size),
             "exhaustiveness": exhaustiveness,
+            "num_modes": num_modes,
             "poses": [{"mode": pose.mode, "affinity": pose.affinity,
                        "rmsd_lb": pose.rmsd_lb, "rmsd_ub": pose.rmsd_ub} for pose in poses],
         }

@@ -1,37 +1,41 @@
 # ligand_docking
 
-Dock a small molecule into a protein with AutoDock Vina from Python, then look at
-the result in a static 3D page: ligand on its own, receptor on its own, and the
-complex, with the score table beside them.
+Dock a small molecule into a protein with AutoDock Vina, then look at the result
+in 3D: the ligand on its own, the receptor with the search box drawn on it, and
+the complex, with the score table beside them. Runs are kept as projects, so an
+old docking can be reopened weeks later.
 
-No server is involved. The viewer is one HTML file plus two JavaScript files, and
-it opens by double-click. AutoDock Vina stays the docking engine — this package
-prepares nothing and re-implements nothing, it runs the official binary and reads
-what it writes.
+No server has to be installed anywhere. The viewer is one HTML file plus two
+JavaScript files, and it opens straight from disk. AutoDock Vina stays the
+docking engine — this package prepares the inputs, runs the official binary and
+reads what it writes; it does not re-implement scoring.
 
-## What is here
+![Docking result viewer](preview.png)
 
-| Path | Contents |
-| --- | --- |
-| `ligand_docking/pdbqt.py` | PDBQT → PDB conversion, Vina output parsing, RMSD to a reference pose |
-| `ligand_docking/dock.py` | Locates the Vina executable and runs it, returns parsed poses |
-| `ligand_docking/report.py` | Writes the standalone viewer page and copies its assets |
-| `ligand_docking/cli.py` | `ligand-docking dock` and `ligand-docking view` |
-| `ligand_docking/viewer/` | The page template, NGL.js and the PDBQT parser used in the browser |
-| `examples/1iep/` | Imatinib and Abl kinase (PDB 1IEP), the official Vina example |
+## Install and prepare
 
-## Install
+Two halves: the Python package, and the Vina binary it calls. Both are needed
+before the first run.
+
+### The Python package
 
 ```
 pip install -e .
 ```
 
-Only the standard library is required for the viewer. `numpy` adds a proper
-RMSD for the reference pose (`pip install numpy`), otherwise a translation-only
-estimate is used.
+The viewer needs nothing beyond the standard library. Two optional pieces:
 
-AutoDock Vina 1.2.7 is bundled in `bin/`, so a run works out of the box on
-Windows, Linux and macOS with no extra download:
+| Extra | Command | What it adds |
+| --- | --- | --- |
+| `numpy` | `pip install numpy` | a properly superposed RMSD to a reference pose; without it a translation-only estimate is used |
+| `prep` | `pip install -e .[prep]` | Meeko, RDKit and gemmi, which convert `.pdb`, `.sdf`, `.mol` and `.mol2` into PDBQT |
+
+`pip install -e .[prep]` is what a normal user wants: give the page a protein
+`.pdb` and a ligand `.sdf` and it prepares both for you.
+
+### The Vina binary
+
+AutoDock Vina 1.2.7 is bundled, so nothing extra is downloaded:
 
 | File | Platform |
 | --- | --- |
@@ -40,146 +44,159 @@ Windows, Linux and macOS with no extra download:
 | `bin/vina_mac_x86_64` | macOS Intel |
 | `bin/vina_mac_aarch64` | macOS Apple silicon |
 
-The package picks the right one for the machine, and sets the executable bit on
+The package picks the right one for the machine and sets the executable bit on
 POSIX if a checkout lost it. `ligand-docking vina` prints which binary will be
-used. To use your own build, pass `--vina /path/to/vina` or set the `VINA_EXE`
-environment variable; both win over the bundled files. On Linux aarch64, drop a
-`bin/vina_linux_aarch64` from the same release and it is picked up.
+used. A build of your own wins over the bundled files: pass `--vina /path/to/vina`
+or set `VINA_EXE`. On Linux aarch64, drop a `bin/vina_linux_aarch64` from the same
+release next to the others.
 
 The binaries are unmodified files from the
-[AutoDock Vina 1.2.7 release](https://github.com/ccsb-scripps/AutoDock-Vina/releases/tag/v1.2.7)
-and are redistributed under the Apache License 2.0 — see
-`bin/LICENSE-AutoDock-Vina`. They are third-party executables: on macOS, download
-them with a browser or run `xattr -d com.apple.quarantine bin/vina_mac_*` if
-Gatekeeper refuses to start them.
+[1.2.7 release](https://github.com/ccsb-scripps/AutoDock-Vina/releases/tag/v1.2.7),
+redistributed under the Apache License 2.0 — see `bin/LICENSE-AutoDock-Vina`. They
+are third-party executables: on macOS, run `xattr -d com.apple.quarantine bin/vina_mac_*`
+if Gatekeeper refuses to start them.
 
-## Prepare the inputs
+### Which files you can give it
 
-The Run panel accepts ordinary files and converts them for you: a receptor
-`.pdb` (or `.cif`) and a ligand `.sdf`, `.mol` or `.mol2`. The conversion uses
-[Meeko](https://meeko.readthedocs.io/), the Forli lab's Python preparation tool:
+The Run panel and `ligand-docking dock` accept the usual formats and convert them
+when Meeko is installed:
+
+| Input | Receptors | Ligands |
+| --- | --- | --- |
+| prepared | `.pdbqt` | `.pdbqt`, a Vina `--out` file |
+| converted for you | `.pdb`, `.ent`, `.cif`, `.mmcif` | `.sdf`, `.mol`, `.mol2` |
+
+Receptor residues whose backbone is incomplete are dropped before conversion, and
+the run reports which ones. Without Meeko the page says so instead of failing
+silently.
+
+### A first smoke test
+
+`examples/1iep/` holds imatinib and Abl kinase (PDB 1IEP), the official Vina
+example, prepared and raw:
 
 ```
-pip install meeko rdkit gemmi      # or: pip install -e .[prep]
+ligand-docking view --receptor examples/1iep/receptor.pdb \
+    --poses examples/1iep/vina_out.pdbqt --crystal examples/1iep/ligand.pdbqt \
+    -o out/1iep.html --open
 ```
 
-If Meeko is not installed, the page says so instead of failing silently. Residues
-whose backbone is incomplete are dropped before conversion, and the run reports
-which ones.
+## Run a docking from the browser
 
-Vina itself still needs PDBQT, so the command line path wants prepared files:
+A static page cannot start a program, so `serve` starts a small local server on
+the loopback interface and the page grows a **Run docking** panel:
 
 ```
-mk_prepare_receptor.py --read_pdb protein.pdb -o receptor -p -v \
-    --box_size 20 20 20 --box_center 15.19 53.90 16.92
-mk_prepare_ligand.py -i ligand.sdf -o ligand.pdbqt
+ligand-docking serve --receptor examples/1iep/receptor.pdb \
+    --poses examples/1iep/vina_out.pdbqt --open
 ```
 
-Keep the `receptor.box.txt` that `mk_prepare_receptor.py` writes with `-v`; it is
-the config file for the run below.
+Then: name the project, choose a receptor and a ligand, press **Run Vina**. The
+chosen files appear in the views immediately, PDB/SDF are converted to PDBQT, and
+when the run finishes the poses and the score table are replaced. Nothing is
+uploaded anywhere: files go from your browser to the local server on 127.0.0.1.
 
-## Dock
+The box is filled in for you from a pose that already sits in the pocket (the
+reference pose if there is one, otherwise the first docked pose):
+
+| Field | Meaning |
+| --- | --- |
+| **centre** | centroid of that pose, in Å — where the box sits |
+| **size** | its extent plus 12 Å, never below 18 Å — how far Vina may search |
+| **effort** | Vina exhaustiveness: how many independent searches. 8 is a quick look, 32–64 a result worth keeping. It does not set how many poses come back |
+| **poses** | the cap on returned poses (Vina's `--num-modes`, 9). Fewer are written when the searches only find a few distinct clusters |
+
+The search box is drawn in the receptor view, so you can see what is being
+sampled; change centre or size and the box moves with you.
+
+### Projects
+
+Every press of **Run Vina** becomes a project under `projects/`:
+
+```
+projects/20261105-173506-809add-imatinib-test/
+├── receptor.pdbqt     prepared receptor
+├── ligand.pdbqt       prepared ligand
+├── poses.pdbqt        the Vina output
+└── project.json       name, time, box, effort and the score of every pose
+```
+
+The **Projects** list in the page shows what has been run; click one to reopen its
+structures, poses, scores and box. The list is read from disk on every request, so
+projects survive restarts and can be copied or archived like any other folder.
+They stay local — `projects/` is in `.gitignore`.
+
+## Command line
+
+| Command | What it does |
+| --- | --- |
+| `ligand-docking dock` | run Vina on prepared inputs, optionally write the viewer |
+| `ligand-docking view` | build a viewer page from an existing run |
+| `ligand-docking serve` | serve the viewer with the Run panel and projects |
+| `ligand-docking vina` | print the Vina binary that will be used |
 
 ```
 ligand-docking dock --receptor receptor.pdbqt --ligand ligand.pdbqt \
     --config receptor.box.txt --exhaustiveness 32 \
     -o run_out.pdbqt --html run.html --open
-```
 
-or give the box directly:
-
-```
-ligand-docking dock --receptor receptor.pdbqt --ligand ligand.pdbqt \
-    --center 15.19 53.90 16.92 --size 20 20 20 --html run.html
-```
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `--receptor`, `--ligand` | required | prepared PDBQT files |
-| `-o`, `--out` | `<ligand>_out.pdbqt` | Vina output file |
-| `--config` | none | Vina config file with the search box |
-| `--center`, `--size` | none | search box, used when there is no `--config` |
-| `--exhaustiveness` | `32` | search effort |
-| `--num-modes` | `9` | poses to keep |
-| `--seed` | `42` | random seed, so runs are repeatable |
-| `--cpu` | `0` | `0` uses every core |
-| `--vina` | auto | path to the Vina executable |
-| `--html` | none | also write the viewer page |
-| `--crystal` | none | reference ligand for the RMSD badge |
-| `--open` | off | open the viewer when it is written |
-
-## Run a docking from the browser
-
-A static page cannot start a program, so `serve` starts a small local server
-(loopback only) and the page gains a **Run docking** panel:
-
-```
-ligand-docking serve --receptor receptor.pdb --poses run_out.pdbqt --open
-```
-
-Then, on the page: choose a receptor (`.pdb`, `.pdbqt`) and a ligand (`.pdbqt`,
-`.sdf`, `.mol`, `.mol2`), press **Run Vina**. PDB and SDF are converted to PDBQT
-first, so no separate preparation step is needed. The poses and the score table
-are replaced with the new result; nothing is uploaded anywhere, the files go from
-your browser to the local server on 127.0.0.1.
-
-The box is filled in for you from a pose that already sits in the pocket (the
-reference pose if there is one, otherwise the first docked pose): **centre** is
-its centroid, **size** is its extent plus 12 Å, never smaller than 18 Å.
-**effort** starts at 8 — enough for a quick look; raise it to 32–64 for a run
-worth keeping.
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `--receptor`, `--poses` | required | what the page shows first |
-| `--crystal` | none | reference ligand for the RMSD badge |
-| `--title`, `--subtitle` | from file names | header text |
-| `--port`, `--host` | `8766`, `127.0.0.1` | where the server listens |
-| `--workdir` | `./.ligand-docking-tmp` | run folders for the docking jobs |
-| `--projects` | `./projects` | where docking projects are saved |
-| `--vina` | bundled binary | path to the Vina executable |
-| `--open` | off | open the page when the server is ready |
-
-### Projects
-
-Every press of **Run Vina** becomes a project, named in the *Project name* box
-(a timestamp name is filled in for you). A project is a folder under
-`projects/` holding the prepared receptor, the prepared ligand, the Vina output
-and a `project.json` with the name, time, box and scores.
-
-The **Projects** list in the page shows what has been run; click one to reopen
-its structures, poses and scores. The list is read from disk each time, so
-projects survive restarts and can be copied or archived like any other folder.
-They stay local: `projects/` is in `.gitignore`.
-
-The work folder has to be writable by the Vina process, which is why it defaults
-to the current directory rather than the system temp folder.
-
-## View an existing run
-
-```
 ligand-docking view --receptor receptor.pdb --poses run_out.pdbqt \
     --crystal ligand.pdbqt -o run.html --open
 ```
 
-`--poses` accepts a Vina `--out` file (scores and all poses) or a single ligand
-file (`.sdf`, `.mol2`, `.pdb`, `.pdbqt`), which gives one pose and an empty score
-table.
+`dock` options: `--receptor` and `--ligand` (required), `-o/--out`,
+`--config` or `--center X Y Z` with `--size X Y Z`, `--exhaustiveness` (32),
+`--num-modes` (9), `--seed` (42), `--cpu` (0 = every core), `--vina`,
+`--html`, `--crystal`, `--title`, `--open`.
+
+`view` options: `--receptor`, `--poses`, `-o/--out`, `--crystal`, `--title`,
+`--subtitle`, `--open`. `--poses` takes a Vina `--out` file (scores and every
+pose) or a single ligand file (one pose, empty score table).
+
+`serve` options: `--receptor` and `--poses` (what the page shows first),
+`--crystal`, `--title`, `--subtitle`, `--port` (8766), `--host` (127.0.0.1),
+`--workdir` (`.ligand-docking-tmp`), `--projects` (`./projects`), `--vina`,
+`--open`. The work folder must be writable by the Vina process, which is why it
+defaults to the current directory rather than the system temp folder.
 
 ## What the page shows
 
-![Docking result viewer](preview.png)
-
-- **Ligand** — the pose on its own, ball and stick by element.
-- **Receptor** — cartoon coloured by secondary structure.
-- **Complex** — the same pose inside the pocket, with the camera framed on the
-  binding site.
+- **Ligand** — the chosen or docked pose on its own, ball and stick by element.
+- **Receptor** — cartoon coloured by secondary structure, with the search box drawn as a wireframe.
+- **Complex** — the pose inside the pocket.
 - **Docking modes** — affinity and RMSD l.b./u.b. per pose; click a row to switch
-  all views to that pose.
+  every view to that pose.
 - **Display** — receptor surface, the reference pose in grey, and spin.
-- **Load your own files** — drop in a receptor and a ligand or Vina output from
-  disk; they are parsed in the browser and never uploaded.
+
+The title is built from the file names unless `--title` says otherwise; the line
+under it names the Vina build that produced the poses.
+
+## Using it from Python
+
+```python
+from ligand_docking import run_vina, build_viewer, prepare_receptor, prepare_ligand
+
+receptor = prepare_receptor("protein.pdb", "work/receptor.pdbqt")["pdbqt"]
+ligand = prepare_ligand("ligand.sdf", "work/ligand.pdbqt")["pdbqt"]
+result = run_vina(receptor, ligand, "work/out.pdbqt",
+                  center=(15.19, 53.90, 16.92), size=(20, 20, 20),
+                  exhaustiveness=32)
+print(result["poses"][0].affinity)
+build_viewer(receptor, result["poses"], "run.html", crystal="ligand.pdbqt")
+```
+
+## Limits worth knowing
+
+- Vina scores rank poses; they are not binding free energies. Do not read a
+  −10 kcal/mol result as a measured affinity.
+- A low `effort` returns fewer distinct poses, not a cheaper version of the same
+  answer; raise it before believing a ranking.
+- The viewer needs a WebGL-capable browser. Without the local server it is
+  read-only: no Run panel, no projects.
+- Nothing here prepares a protein beyond atom typing: missing loops, alternate
+  locations and protonation states remain your call.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The bundled Vina binaries are Apache 2.0, see
+`bin/LICENSE-AutoDock-Vina`.
