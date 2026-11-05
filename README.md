@@ -64,21 +64,34 @@ when Meeko is installed:
 | Input | Receptors | Ligands |
 | --- | --- | --- |
 | prepared | `.pdbqt` | `.pdbqt`, a Vina `--out` file |
-| converted for you | `.pdb`, `.ent`, `.cif`, `.mmcif` | `.sdf`, `.mol`, `.mol2` |
+| converted for you | `.pdb`, `.ent`, `.cif`, `.mmcif` | `.sdf`, `.mol`, `.mol2`, `.smi`/`.smiles`, small-molecule `.pdb` |
 
-Receptor residues whose backbone is incomplete are dropped before conversion, and
-the run reports which ones. Without Meeko the page says so instead of failing
-silently.
+mmCIF is read with gemmi and turned into PDB first. Ligands given as SMILES get 3D
+coordinates from RDKit (ETKDG embedding, MMFF refinement); SDF, MOL and PDB inputs
+get explicit hydrogens added, which Meeko requires. Receptor residues whose
+backbone is incomplete are dropped before conversion, and the run reports which
+ones. Without Meeko the page says so instead of failing silently.
 
 ### A first smoke test
 
-`examples/1iep/` holds imatinib and Abl kinase (PDB 1IEP), the official Vina
-example, prepared and raw:
+Two examples ship with the repository, both taken from the official Vina set:
+
+| Folder | System | Best score |
+| --- | --- | --- |
+| `examples/1iep/` | imatinib in Abl kinase (PDB 1IEP) | −13.22 kcal/mol |
+| `examples/1s63/` | inhibitor in a zinc metalloprotein (PDB 1S63) | −9.36 kcal/mol |
+
+Each folder holds the receptor as `.pdb` and `.pdbqt`, the ligand, the Vina output
+and the box the run used:
 
 ```
 ligand-docking view --receptor examples/1iep/receptor.pdb \
     --poses examples/1iep/vina_out.pdbqt --crystal examples/1iep/ligand.pdbqt \
     -o out/1iep.html --open
+
+ligand-docking view --receptor examples/1s63/receptor.pdb \
+    --poses examples/1s63/vina_out.pdbqt --crystal examples/1s63/ligand.sdf \
+    -o out/1s63.html --open
 ```
 
 ## Run a docking from the browser
@@ -107,7 +120,12 @@ reference pose if there is one, otherwise the first docked pose):
 | **poses** | the cap on returned poses (Vina's `--num-modes`, 9). Fewer are written when the searches only find a few distinct clusters |
 
 The search box is drawn in the receptor view, so you can see what is being
-sampled; change centre or size and the box moves with you.
+sampled; change centre or size and the box moves with you. The views spin by
+default — untick **Spin all views** in the Display panel to stop them.
+
+Choosing a new receptor or a new ligand clears the complex: the old pose belongs
+to the old pair, so it is removed rather than left floating in the new structure.
+Run again to fill it.
 
 ### Projects
 

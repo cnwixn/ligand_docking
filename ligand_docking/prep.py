@@ -1,8 +1,9 @@
 """Turn ordinary structure files into the PDBQT files Vina needs.
 
 Meeko (the Forli lab's preparation tool) does the chemistry: it assigns atom
-types, Gasteiger charges and rotatable bonds. This module only locates it, feeds
-it sensible input and reports clearly when something cannot be prepared.
+types, Gasteiger charges and rotatable bonds. This module only locates it, cleans
+the input, converts between formats and reports clearly when something cannot be
+prepared.
 
     pip install meeko rdkit gemmi
 """
@@ -14,6 +15,7 @@ import sys
 from pathlib import Path
 
 LIGAND_SUFFIXES = {".sdf", ".mol", ".mol2"}
+SMILES_SUFFIXES = {".smi", ".smiles"}
 RECEPTOR_SUFFIXES = {".pdb", ".ent", ".cif", ".mmcif"}
 BACKBONE = {"N", "CA", "C", "O"}
 
@@ -74,8 +76,68 @@ def clean_pdb(text: str) -> tuple[str, list[str]]:
     return f"{body}\nEND\n", dropped
 
 
+def _cif_to_pdb(source: Path, target: Path) -> None:
+    """mmCIF -> PDB, so the rest of the pipeline only sees PDB."""
+    try:
+        import gemmi
+    except ImportError:
+        raise PrepError(
+            "Reading .cif needs gemmi: pip install gemmi (or give a .pdb)."
+        ) from None
+    structure = gemmi.read_structure(str(source))
+    structure.write_pdb(str(target))
+
+
+def _write_ligand_sdf(source: Path, target: Path) -> None:
+    """Normalise any ligand input to an SDF with explicit hydrogens and 3D coordinates."""
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+    except ImportError:
+        raise PrepError(
+            "Reading this ligand format needs RDKit: pip install rdkit."
+        ) from None
+
+    suffix = source.suffix.lower()
+    molecules = []
+
+    if suffix in SMILES_SUFFIXES:
+        for line in source.read_text(encoding="utf-8", errors="ignore").splitlines():
+            text = line.split("#", 1)[0].strip()
+            if not text:
+                continue
+            molecule = Chem.MolFromSmiles(text.split()[0])
+            if molecule is None:
+                raise PrepError(f"Could not read the SMILES: {text[:60]}")
+            molecules.append(molecule)
+        if not molecules:
+            raise PrepError("The SMILES file is empty.")
+    elif suffix == ".pdb":
+        molecule = Chem.MolFromPDBFile(str(source), removeHs=False, sanitize=True)
+        if molecule is None:
+            raise PrepError(f"Could not read a molecule from {source.name}.")
+        molecules.append(molecule)
+    else:
+        supplier = Chem.SDMolSupplier(str(source), removeHs=False)
+        molecules = [mol for mol in supplier if mol is not None]
+        if not molecules:
+            raise PrepError(f"Could not read any molecule from {source.name}.")
+
+    writer = Chem.SDWriter(str(target))
+    try:
+        for molecule in molecules:
+            molecule = Chem.AddHs(molecule, addCoords=molecule.GetNumConformers() > 0)
+            if molecule.GetNumConformers() == 0:
+                if AllChem.EmbedMolecule(molecule, randomSeed=42) != 0:
+                    raise PrepError("Could not generate 3D coordinates for the ligand.")
+                AllChem.MMFFOptimizeMolecule(molecule, maxIters=500)
+            writer.write(molecule)
+    finally:
+        writer.close()
+
+
 def prepare_receptor(source: str | Path, out_pdbqt: str | Path) -> dict:
-    """PDB/mmCIF -> receptor PDBQT. Returns the path and any dropped residues."""
+    """PDB / mmCIF -> receptor PDBQT. Returns the path and any dropped residues."""
     source_path = Path(source).expanduser().resolve()
     target = Path(out_pdbqt).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -84,9 +146,13 @@ def prepare_receptor(source: str | Path, out_pdbqt: str | Path) -> dict:
         target.write_bytes(source_path.read_bytes())
         return {"pdbqt": target, "dropped": []}
 
+    pdb_path = source_path
+    if source_path.suffix.lower() in (".cif", ".mmcif"):
+        pdb_path = target.with_suffix(".from_cif.pdb")
+        _cif_to_pdb(source_path, pdb_path)
+
     cleaned_path = target.with_suffix(".cleaned.pdb")
-    text = source_path.read_text(encoding="utf-8", errors="ignore")
-    cleaned, dropped = clean_pdb(text)
+    cleaned, dropped = clean_pdb(pdb_path.read_text(encoding="utf-8", errors="ignore"))
     if not cleaned.strip():
         raise PrepError(f"{source_path.name} has no complete protein residues.")
     cleaned_path.write_text(cleaned, encoding="utf-8")
@@ -105,7 +171,7 @@ def prepare_receptor(source: str | Path, out_pdbqt: str | Path) -> dict:
 
 
 def prepare_ligand(source: str | Path, out_pdbqt: str | Path) -> dict:
-    """SDF/MOL/MOL2 -> ligand PDBQT."""
+    """PDBQT, SDF/MOL/MOL2, SMILES or a small-molecule PDB -> ligand PDBQT."""
     source_path = Path(source).expanduser().resolve()
     target = Path(out_pdbqt).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -114,8 +180,14 @@ def prepare_ligand(source: str | Path, out_pdbqt: str | Path) -> dict:
         target.write_bytes(source_path.read_bytes())
         return {"pdbqt": target}
 
+    if source_path.suffix.lower() in (LIGAND_SUFFIXES | SMILES_SUFFIXES | {".pdb"}):
+        sdf_path = target.with_suffix(".prepared.sdf")
+        _write_ligand_sdf(source_path, sdf_path)
+    else:
+        sdf_path = source_path
+
     result = _run_meeko("meeko.cli.mk_prepare_ligand",
-                        ["-i", str(source_path), "-o", str(target)])
+                        ["-i", str(sdf_path), "-o", str(target)])
     if result.returncode != 0 and "No module named 'meeko'" in (result.stderr or ""):
         raise _meeko_missing(result.stderr or "")
     if result.returncode != 0 or not target.is_file():

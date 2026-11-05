@@ -171,11 +171,11 @@
         <label class="lbl">Project name
           <input type="text" id="run-name" placeholder="my docking run">
         </label>
-        <label class="lbl">Receptor — .pdbqt, .pdb (converted for you)
-          <input type="file" id="run-receptor" accept=".pdbqt,.pdb,.ent">
+        <label class="lbl">Receptor — .pdbqt, .pdb, .cif (converted for you)
+          <input type="file" id="run-receptor" accept=".pdbqt,.pdb,.ent,.cif,.mmcif">
         </label>
-        <label class="lbl">Ligand — .pdbqt, .sdf, .mol, .mol2 (converted for you)
-          <input type="file" id="run-ligand" accept=".pdbqt,.sdf,.mol,.mol2">
+        <label class="lbl">Ligand — .pdbqt, .sdf, .mol, .mol2, .smi (converted for you)
+          <input type="file" id="run-ligand" accept=".pdbqt,.sdf,.mol,.mol2,.smi,.smiles,.pdb">
         </label>
       </div>
       <div class="run-grid">
@@ -195,7 +195,11 @@
       <p class="run-help">
         <b>centre</b> = where the box sits (Å). <b>size</b> = how big the box is (Å);
         bigger means a wider search and a longer run. <b>effort</b> = Vina
-        exhaustiveness, 8 for a quick look, 32–64 for a result worth keeping.
+        exhaustiveness: how many independent searches run, 8 for a quick look,
+        32–64 for a result worth keeping. <b>poses</b> = the most poses to return
+        (Vina <code>--num-modes</code>, 9); fewer come back when the searches only
+        find a few genuinely different pockets, so effort — not poses — controls
+        how complete the answer is.
       </p>
       <button class="run" id="run-btn">Run Vina</button>
       <div class="run-status" id="run-status"></div>
@@ -301,6 +305,10 @@ function showPose(index) {
 function rebuildTable() {
   const tbody = document.getElementById("scores");
   tbody.innerHTML = "";
+  if (!state.poses.length) {
+    tbody.innerHTML = "<tr><td colspan='4' style='text-align:left;color:#5a6976'>" +
+      "No poses yet — choose a receptor and a ligand, then Run Vina.</td></tr>";
+  }
   const fmt = (v) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : v.toFixed(2);
   state.poses.forEach((pose, index) => {
     const row = document.createElement("tr");
@@ -346,6 +354,7 @@ document.getElementById("run-receptor").addEventListener("change", async (event)
     ext: kind === "cif" ? "cif" : (kind === "mol2" ? "mol2" : "pdb"),
   };
   state.receptorLabel = file.name;
+  resetComplex("New receptor loaded — run a docking to fill the complex.");
   refresh(false);
   prefillBox();
   drawBox();
@@ -368,6 +377,7 @@ document.getElementById("run-ligand").addEventListener("change", async (event) =
   } else {
     const ext = kind === "sdf" ? "sdf" : (kind === "mol2" ? "mol2" : "pdb");
     const pdb = kind === "pdbqt" ? P.pdbqtToPdb(text) : text;
+    resetComplex("New ligand loaded — run a docking to fill the complex.");
     if (ligandLone) { stages.ligand.removeComponent(ligandLone); ligandLone = null; }
     load(stages.ligand, pdb, ext).then((comp) => {
       comp.addRepresentation("ball+stick", { colorScheme: "element", radiusScale: 1.6, aspectRatio: 2.2 });
@@ -377,6 +387,23 @@ document.getElementById("run-ligand").addEventListener("change", async (event) =
     document.getElementById("ligand-sub").textContent = file.name + " (not docked yet)";
   }
 });
+
+/* ---------------- clearing the complex when the inputs change ---------------- */
+
+function resetComplex(message) {
+  state.poses = [];
+  state.crystal = null;
+  state.crystalRmsd = null;
+  if (ligandLone) { stages.ligand.removeComponent(ligandLone); ligandLone = null; }
+  if (ligandInComplex) { stages.complex.removeComponent(ligandInComplex); ligandInComplex = null; }
+  document.getElementById("scores").innerHTML =
+    "<tr><td colspan='4' style='text-align:left;color:#5a6976'>" +
+    (message || "No poses yet — run a docking.") + "</td></tr>";
+  document.getElementById("mode-badge").textContent = "no poses yet";
+  document.getElementById("complex-sub").textContent = "run a docking";
+  document.getElementById("ligand-sub").textContent = "—";
+  document.getElementById("rmsd-badge").textContent = "no reference pose";
+}
 
 /* ---------------- search box in the receptor view ---------------- */
 
@@ -686,6 +713,8 @@ setTimeout(() => {
   const nameField = document.getElementById("run-name");
   if (nameField && !nameField.value) nameField.value = defaultProjectName();
   if (DATA.serverMode) refreshProjects();
+  document.getElementById("spin").checked = true;
+  Object.values(stages).forEach((stage) => stage.setSpin(true));
 }, 60);
 </script>
 </body>
