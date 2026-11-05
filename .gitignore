@@ -7,3 +7,4 @@ dist/
 out/
 .ligand-docking-tmp/
 .testlibs/
+projects/

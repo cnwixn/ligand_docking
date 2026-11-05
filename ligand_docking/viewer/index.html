@@ -72,6 +72,16 @@
   .run-help { font-size: 11px; color: var(--ink-2); margin: 8px 0 0; line-height: 1.45; }
   .run-files .lbl { display: block; font-size: 11px; color: var(--ink-2); margin-bottom: 4px; }
   .run-files input[type=file] { font-size: 11px; margin-top: 2px; }
+  .run-files input[type=text] { width: 100%; padding: 4px 6px; border: 1px solid var(--line);
+    border-radius: 6px; font-size: 12px; margin-top: 2px; }
+  .project-list { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow: auto; }
+  .project-item {
+    padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+    font-size: 12px; display: flex; justify-content: space-between; gap: 8px;
+  }
+  .project-item:hover { background: var(--accent-soft); }
+  .project-item.active { border-color: var(--accent); background: var(--accent-soft); }
+  .project-item .score { color: var(--accent); font-weight: 600; white-space: nowrap; }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px;
@@ -118,16 +128,12 @@
     <div class="view">
       <h2>Ligand
         <span class="meta" id="ligand-sub"></span>
-        <label class="mini">View ligand&#8230;<input type="file" id="ligand-file" hidden
-          accept=".pdbqt,.sdf,.mol,.mol2,.pdb"></label>
       </h2>
       <div class="viewport" id="v-ligand"></div>
     </div>
     <div class="view">
       <h2>Receptor
         <span class="meta" id="receptor-sub"></span>
-        <label class="mini">View receptor&#8230;<input type="file" id="receptor-file" hidden
-          accept=".pdb,.ent,.pdbqt,.cif,.mol2"></label>
       </h2>
       <div class="viewport" id="v-protein"></div>
     </div>
@@ -153,13 +159,22 @@
       Loaded files are read in the browser and never uploaded.</p>
     </div>
 
+    <div class="card" id="projects-card" style="display:none">
+      <h3>Projects</h3>
+      <div class="project-list" id="project-list"></div>
+      <p class="hint">Every run is saved as a project folder; click one to reopen it.</p>
+    </div>
+
     <div class="card" id="run-card" style="display:none">
       <h3>Run docking</h3>
       <div class="run-files">
-        <label class="lbl">Docking receptor — .pdbqt, .pdb (converted for you)
+        <label class="lbl">Project name
+          <input type="text" id="run-name" placeholder="my docking run">
+        </label>
+        <label class="lbl">Receptor — .pdbqt, .pdb (converted for you)
           <input type="file" id="run-receptor" accept=".pdbqt,.pdb,.ent">
         </label>
-        <label class="lbl">Docking ligand — .pdbqt, .sdf, .mol, .mol2 (converted for you)
+        <label class="lbl">Ligand — .pdbqt, .sdf, .mol, .mol2 (converted for you)
           <input type="file" id="run-ligand" accept=".pdbqt,.sdf,.mol,.mol2">
         </label>
       </div>
@@ -308,7 +323,7 @@ function refresh(keepView) {
   });
 }
 
-/* ---------------- local files ---------------- */
+/* ---------------- files chosen in the Run panel ---------------- */
 
 function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -319,7 +334,7 @@ function readFile(file) {
   });
 }
 
-document.getElementById("receptor-file").addEventListener("change", async (event) => {
+document.getElementById("run-receptor").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
   const text = await readFile(file);
@@ -330,9 +345,11 @@ document.getElementById("receptor-file").addEventListener("change", async (event
   };
   state.receptorLabel = file.name;
   refresh(false);
+  prefillBox();
+  drawBox();
 });
 
-document.getElementById("ligand-file").addEventListener("change", async (event) => {
+document.getElementById("run-ligand").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
   const text = await readFile(file);
@@ -341,15 +358,71 @@ document.getElementById("ligand-file").addEventListener("change", async (event) 
     const poses = P.parseVinaOut(text);
     if (!poses.length) { alert("No poses found in " + file.name); return; }
     state.poses = poses.map((pose) => ({ ...pose, ext: "pdb" }));
+    state.crystal = null;
+    state.crystalRmsd = null;
+    rebuildTable();
+    showPose(0);
+    prefillBox();
   } else {
     const ext = kind === "sdf" ? "sdf" : (kind === "mol2" ? "mol2" : "pdb");
     const pdb = kind === "pdbqt" ? P.pdbqtToPdb(text) : text;
-    state.poses = [{ mode: 1, affinity: null, rmsd_lb: null, rmsd_ub: null, pdb, ext }];
+    if (ligandLone) { stages.ligand.removeComponent(ligandLone); ligandLone = null; }
+    load(stages.ligand, pdb, ext).then((comp) => {
+      comp.addRepresentation("ball+stick", { colorScheme: "element", radiusScale: 1.6, aspectRatio: 2.2 });
+      ligandLone = comp;
+      comp.autoView(400);
+    });
+    document.getElementById("ligand-sub").textContent = file.name + " (not docked yet)";
   }
-  state.crystal = null;
-  state.crystalRmsd = null;
-  state.ligandLabel = file.name;
-  refresh(false);
+});
+
+/* ---------------- search box in the receptor view ---------------- */
+
+let boxComp = null;
+
+function boxPdb(center, size) {
+  const half = size.map((value) => value / 2);
+  const corners = [];
+  for (const dx of [-1, 1]) for (const dy of [-1, 1]) for (const dz of [-1, 1]) {
+    corners.push([center[0] + dx * half[0], center[1] + dy * half[1], center[2] + dz * half[2]]);
+  }
+  let pdb = "";
+  corners.forEach((point, index) => {
+    const atom = String(index + 1).padStart(5);
+    const x = point[0].toFixed(3).padStart(8);
+    const y = point[1].toFixed(3).padStart(8);
+    const z = point[2].toFixed(3).padStart(8);
+    pdb += `HETATM${atom}  C   BOX A   1    ${x}${y}${z}  1.00  0.00           C\n`;
+  });
+  for (let i = 0; i < 8; i += 1) {
+    for (let j = i + 1; j < 8; j += 1) {
+      const differing = [0, 1, 2].filter((k) => corners[i][k] !== corners[j][k]).length;
+      if (differing === 1) {
+        pdb += `CONECT${String(i + 1).padStart(5)}${String(j + 1).padStart(5)}\n`;
+      }
+    }
+  }
+  return pdb + "END\n";
+}
+
+function clearBox() {
+  if (boxComp) { stages.receptor.removeComponent(boxComp); boxComp = null; }
+}
+
+function drawBox() {
+  const value = (id) => parseFloat(document.getElementById(id).value);
+  const center = [value("run-cx"), value("run-cy"), value("run-cz")];
+  const size = [value("run-sx"), value("run-sy"), value("run-sz")];
+  if (![...center, ...size].every(Number.isFinite)) { clearBox(); return; }
+  clearBox();
+  load(stages.receptor, boxPdb(center, size), "pdb").then((comp) => {
+    comp.addRepresentation("licorice", { colorScheme: "uniform", colorValue: 0x0d6b8a, radiusScale: 0.25 });
+    boxComp = comp;
+  });
+}
+
+["run-cx", "run-cy", "run-cz", "run-sx", "run-sy", "run-sz"].forEach((id) => {
+  document.getElementById(id).addEventListener("change", drawBox);
 });
 
 /* ---------------- display options ---------------- */
@@ -449,7 +522,71 @@ function prefillBox() {
 
 if (DATA.serverMode) {
   document.getElementById("run-card").style.display = "";
-  document.getElementById("bottom").classList.add("with-run");
+  document.getElementById("projects-card").style.display = "";
+}
+
+function defaultProjectName() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return "docking-" + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) +
+    "-" + pad(now.getHours()) + pad(now.getMinutes());
+}
+
+async function refreshProjects() {
+  if (!DATA.serverMode) return;
+  try {
+    const response = await fetch("/api/projects");
+    const data = await response.json();
+    const list = document.getElementById("project-list");
+    list.innerHTML = "";
+    for (const project of (data.projects || [])) {
+      const item = document.createElement("div");
+      item.className = "project-item";
+      item.dataset.id = project.id;
+      const best = project.poses && project.poses.length
+        ? project.poses[0].affinity.toFixed(2) + " kcal/mol" : "-";
+      item.innerHTML = "<span>" + project.name + "<br><small>" + project.created +
+        "</small></span><span class='score'>" + best + "</span>";
+      item.addEventListener("click", () => loadProject(project.id));
+      list.appendChild(item);
+    }
+    if (!list.children.length) {
+      list.innerHTML = "<p class='hint' style='margin:0'>No projects yet.</p>";
+    }
+  } catch (err) {
+    document.getElementById("project-list").innerHTML =
+      "<p class='hint' style='margin:0'>" + String(err) + "</p>";
+  }
+}
+
+async function loadProject(projectId) {
+  const response = await fetch("/api/project?id=" + encodeURIComponent(projectId));
+  const data = await response.json();
+  if (!data.ok) { runStatus(data.error || "Could not open the project.", true); return; }
+  document.querySelectorAll(".project-item").forEach((node) => {
+    node.classList.toggle("active", node.dataset.id === data.project.id);
+  });
+  state.receptor = { text: data.receptor_pdb, ext: "pdb" };
+  state.receptorLabel = data.project.name;
+  state.poses = data.poses.map((pose) => ({ ...pose, ext: "pdb" }));
+  state.ligandLabel = data.project.name;
+  state.crystal = null;
+  state.crystalRmsd = null;
+  document.getElementById("title").textContent = data.project.name;
+  document.getElementById("subtitle").textContent = DATA.subtitle + " · " + data.project.created;
+  document.getElementById("subtitle").hidden = false;
+  await setProtein(false);
+  rebuildTable();
+  showPose(0);
+  document.getElementById("run-cx").value = data.project.center[0];
+  document.getElementById("run-cy").value = data.project.center[1];
+  document.getElementById("run-cz").value = data.project.center[2];
+  document.getElementById("run-sx").value = data.project.size[0];
+  document.getElementById("run-sy").value = data.project.size[1];
+  document.getElementById("run-sz").value = data.project.size[2];
+  document.getElementById("run-ex").value = data.project.exhaustiveness;
+  drawBox();
+  runStatus("Opened project " + data.project.name + ".");
 }
 
 function runStatus(text, bad) {
@@ -491,6 +628,7 @@ document.getElementById("run-btn").addEventListener("click", async () => {
       receptor_b64: await readBase64(receptorFile),
       ligand_name: ligandFile.name,
       ligand_b64: await readBase64(ligandFile),
+      project_name: value("run-name") || defaultProjectName(),
       center: [value("run-cx"), value("run-cy"), value("run-cz")].map(Number),
       size: [value("run-sx"), value("run-sy"), value("run-sz")].map(Number),
       exhaustiveness: Number(value("run-ex") || 32),
@@ -516,8 +654,13 @@ document.getElementById("run-btn").addEventListener("click", async () => {
     rebuildTable();
     showPose(0);
     prefillBox();
-    runStatus("Done: " + state.poses.length + " poses, best " +
-      data.poses[0].affinity.toFixed(2) + " kcal/mol.");
+    drawBox();
+    if (data.project) {
+      document.getElementById("run-name").value = data.project.name;
+      refreshProjects();
+    }
+    runStatus("Saved as \"" + (data.project ? data.project.name : "project") + "\": " +
+      state.poses.length + " poses, best " + data.poses[0].affinity.toFixed(2) + " kcal/mol.");
   } catch (err) {
     runStatus(String(err), true);
   } finally {
@@ -535,6 +678,10 @@ setTimeout(() => {
   Object.values(stages).forEach((stage) => stage.handleResize());
   refresh(false);
   prefillBox();
+  drawBox();
+  const nameField = document.getElementById("run-name");
+  if (nameField && !nameField.value) nameField.value = defaultProjectName();
+  if (DATA.serverMode) refreshProjects();
 }, 60);
 </script>
 </body>

@@ -136,8 +136,21 @@ worth keeping.
 | `--title`, `--subtitle` | from file names | header text |
 | `--port`, `--host` | `8766`, `127.0.0.1` | where the server listens |
 | `--workdir` | `./.ligand-docking-tmp` | run folders for the docking jobs |
+| `--projects` | `./projects` | where docking projects are saved |
 | `--vina` | bundled binary | path to the Vina executable |
 | `--open` | off | open the page when the server is ready |
+
+### Projects
+
+Every press of **Run Vina** becomes a project, named in the *Project name* box
+(a timestamp name is filled in for you). A project is a folder under
+`projects/` holding the prepared receptor, the prepared ligand, the Vina output
+and a `project.json` with the name, time, box and scores.
+
+The **Projects** list in the page shows what has been run; click one to reopen
+its structures, poses and scores. The list is read from disk each time, so
+projects survive restarts and can be copied or archived like any other folder.
+They stay local: `projects/` is in `.gitignore`.
 
 The work folder has to be writable by the Vina process, which is why it defaults
 to the current directory rather than the system temp folder.

@@ -139,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--vina", help="path to the Vina executable")
     serve.add_argument("--workdir", help="where run folders are written (default: ./.ligand-docking-tmp)")
+    serve.add_argument("--projects", help="where docking projects are kept (default: ./projects)")
     serve.add_argument("--open", action="store_true", help="open the page when the server is up")
     serve.set_defaults(func=cmd_serve)
 
@@ -163,7 +164,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     run_server(page, host=args.host, port=args.port, vina=args.vina,
-               open_browser=args.open, workdir=args.workdir)
+               open_browser=args.open, workdir=args.workdir, projects=args.projects)
     return 0
 
 
