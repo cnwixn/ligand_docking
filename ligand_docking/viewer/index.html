@@ -30,8 +30,8 @@
   }
   .badge.good { background: #e6f4ec; color: var(--good); }
 
-  main { flex: 1; display: grid; grid-template-rows: minmax(360px, 1fr) auto; min-height: 0; }
-  .views { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 14px; min-height: 0; }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 360px; min-height: 0; }
+  .views { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; min-height: 0; }
   .view {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     display: flex; flex-direction: column; overflow: hidden; min-height: 0;
@@ -50,10 +50,12 @@
     padding: 3px 9px; cursor: pointer; white-space: nowrap; background: #fff;
   }
   .mini:hover { background: var(--accent-soft); border-color: var(--accent); }
-  .viewport { flex: 1; min-height: 300px; position: relative; }
+  .viewport { flex: 1; min-height: 240px; position: relative; }
 
-  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; padding: 0 14px 12px; }
-  .bottom.with-run { grid-template-columns: minmax(0, 1fr) 300px 300px; }
+  .side {
+    border-left: 1px solid var(--line); background: var(--card);
+    overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px;
+  }
   .run-grid { display: grid; grid-template-columns: 62px 1fr 1fr 1fr; gap: 6px 8px; align-items: center; }
   .run-grid .lbl { font-size: 11px; color: var(--ink-2); }
   .run-grid input { width: 100%; padding: 4px 6px; border: 1px solid var(--line);
@@ -67,6 +69,9 @@
   button.run:disabled { opacity: .55; cursor: progress; }
   .run-status { font-size: 11px; color: var(--ink-2); margin-top: 6px; min-height: 15px; }
   .run-status.bad { color: #b3261e; }
+  .run-help { font-size: 11px; color: var(--ink-2); margin: 8px 0 0; line-height: 1.45; }
+  .run-files .lbl { display: block; font-size: 11px; color: var(--ink-2); margin-bottom: 4px; }
+  .run-files input[type=file] { font-size: 11px; margin-top: 2px; }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px;
@@ -105,6 +110,7 @@
   <span class="sub" id="subtitle"></span>
   <span class="badge good" id="mode-badge">mode 1</span>
   <span class="badge" id="rmsd-badge"></span>
+  <button class="mini" id="toggle-panels" style="margin-left:auto">Hide panels</button>
 </header>
 
 <main>
@@ -131,7 +137,7 @@
     </div>
   </div>
 
-  <div class="bottom" id="bottom">
+  <aside class="side" id="bottom">
     <div class="card">
       <h3>Docking modes</h3>
       <div class="table-scroll">
@@ -150,21 +156,30 @@
     <div class="card" id="run-card" style="display:none">
       <h3>Run docking</h3>
       <div class="run-files">
-        <input type="file" id="run-receptor" accept=".pdbqt">
-        <input type="file" id="run-ligand" accept=".pdbqt">
+        <label class="lbl">Receptor (.pdbqt)
+          <input type="file" id="run-receptor" accept=".pdbqt">
+        </label>
+        <label class="lbl">Ligand (.pdbqt)
+          <input type="file" id="run-ligand" accept=".pdbqt">
+        </label>
       </div>
       <div class="run-grid">
-        <span class="lbl">centre</span>
+        <span class="lbl" title="centre of the search box in Angstrom">centre</span>
         <input type="text" id="run-cx" placeholder="x">
         <input type="text" id="run-cy" placeholder="y">
         <input type="text" id="run-cz" placeholder="z">
-        <span class="lbl">size</span>
+        <span class="lbl" title="box edge lengths in Angstrom">size</span>
         <input type="text" id="run-sx" placeholder="20">
         <input type="text" id="run-sy" placeholder="20">
         <input type="text" id="run-sz" placeholder="20">
-        <span class="lbl">effort</span>
+        <span class="lbl" title="Vina exhaustiveness: higher is slower and more reliable">effort</span>
         <input type="text" id="run-ex" placeholder="32" style="grid-column: span 3">
       </div>
+      <p class="run-help">
+        <b>centre</b> = where the box sits (Å). <b>size</b> = how big the box is (Å);
+        bigger means a wider search and a longer run. <b>effort</b> = Vina
+        exhaustiveness, 8 for a quick look, 32–64 for a result worth keeping.
+      </p>
       <button class="run" id="run-btn">Run Vina</button>
       <div class="run-status" id="run-status"></div>
     </div>
@@ -178,7 +193,7 @@
       </div>
       <p class="hint">Drag to rotate, scroll to zoom, right-drag to translate.</p>
     </div>
-  </div>
+  </aside>
 </main>
 
 <footer>
@@ -206,6 +221,7 @@ const state = {
 };
 
 let proteinReps = [];
+const surfaceReps = new Map();
 let ligandLone = null;
 let ligandInComplex = null;
 let crystalComp = null;
@@ -224,12 +240,12 @@ function setProtein(keepView) {
     load(stages.receptor, state.receptor.text, state.receptor.ext).then((comp) => {
       comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.95 });
       proteinReps.push(comp);
-      if (!keepView) setTimeout(() => stages.receptor.autoView(300), 150);
+      if (!keepView) { comp.autoView(0); setTimeout(() => comp.autoView(300), 400); }
     }),
     load(stages.complex, state.receptor.text, state.receptor.ext).then((comp) => {
       comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.55 });
       proteinReps.push(comp);
-      if (!keepView) setTimeout(() => stages.complex.autoView(300), 150);
+      if (!keepView) { comp.autoView(0); setTimeout(() => comp.autoView(300), 400); }
     }),
   ]);
 }
@@ -339,15 +355,18 @@ document.getElementById("ligand-file").addEventListener("change", async (event) 
 /* ---------------- display options ---------------- */
 
 document.getElementById("surface").addEventListener("change", (event) => {
-  proteinReps.forEach((comp) => {
-    if (event.target.checked) {
-      comp.addRepresentation("surface",
+  if (event.target.checked) {
+    proteinReps.forEach((comp) => {
+      const rep = comp.addRepresentation("surface",
         { colorScheme: "uniform", colorValue: 0xaab4bd, opacity: 0.22, surfaceType: "av" });
-    } else {
-      comp.representations.filter((rep) => rep.type === "surface")
-        .forEach((rep) => comp.removeRepresentation(rep));
-    }
-  });
+      surfaceReps.set(comp, rep);
+    });
+  } else {
+    surfaceReps.forEach((rep, comp) => {
+      try { comp.removeRepresentation(rep); } catch (e) {}
+    });
+    surfaceReps.clear();
+  }
 });
 
 document.getElementById("crystal").addEventListener("change", (event) => {
@@ -364,6 +383,16 @@ document.getElementById("crystal").addEventListener("change", (event) => {
 
 document.getElementById("spin").addEventListener("change", (event) => {
   Object.values(stages).forEach((stage) => stage.setSpin(event.target.checked));
+});
+
+document.getElementById("toggle-panels").addEventListener("click", (event) => {
+  const bottom = document.getElementById("bottom");
+  const hiding = bottom.style.display !== "none";
+  bottom.style.display = hiding ? "none" : "";
+  event.target.textContent = hiding ? "Show panels" : "Hide panels";
+  requestAnimationFrame(() => {
+    Object.values(stages).forEach((stage) => stage.handleResize());
+  });
 });
 
 window.addEventListener("resize", () => {
