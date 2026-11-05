@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docking result viewer</title>
+<script src="ngl.js"></script>
+<script src="parser.js"></script>
+<style>
+  :root {
+    --ink: #16202b; --ink-2: #5a6976; --line: #d9e0e6; --card: #fff;
+    --bg: #f1f4f7; --accent: #0d6b8a; --accent-soft: #e4f1f6; --good: #1a7f4b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  header {
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 11px 20px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 17px; }
+  header .sub { color: var(--ink-2); font-size: 12px; }
+  .badge {
+    background: var(--accent-soft); color: var(--accent); border-radius: 999px;
+    padding: 3px 11px; font-size: 12px; font-weight: 600;
+  }
+  .badge.good { background: #e6f4ec; color: var(--good); }
+
+  main { flex: 1; display: grid; grid-template-rows: minmax(280px, 1fr) auto; min-height: 0; }
+  .views { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; min-height: 0; }
+  .view {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    display: flex; flex-direction: column; overflow: hidden; min-height: 0;
+  }
+  .view h2 {
+    margin: 0; padding: 8px 12px; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-2); border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 8px; font-weight: 600;
+  }
+  .view h2 span { font-weight: 400; text-transform: none; letter-spacing: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .viewport { flex: 1; min-height: 220px; position: relative; }
+
+  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 360px 300px; gap: 12px; padding: 0 12px 12px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .card h3 {
+    margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 5px 8px; text-align: right; }
+  th { font-size: 11px; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  tbody tr { cursor: pointer; border-bottom: 1px solid #eef2f5; }
+  tbody tr:hover { background: #f7fafc; }
+  tbody tr.active { background: var(--accent-soft); font-weight: 600; }
+  tbody tr.active td:first-child { color: var(--accent); }
+
+  .file-row { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+  .file-row .label { font-size: 12px; color: var(--ink-2); }
+  .file-row .picked { font-size: 12px; color: var(--accent); word-break: break-all; }
+  .file-row input[type=file] { font-size: 12px; }
+  .controls { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+  label.ctl { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .hint { font-size: 12px; color: var(--ink-2); margin: 8px 0 0; }
+  footer { padding: 8px 20px; font-size: 11px; color: var(--ink-2); }
+  @media (max-width: 1250px) {
+    .views { grid-template-columns: 1fr; }
+    .bottom { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Docking result</h1>
+  <span class="sub" id="subtitle"></span>
+  <span class="badge good" id="mode-badge">mode 1</span>
+  <span class="badge" id="rmsd-badge"></span>
+</header>
+
+<main>
+  <div class="views">
+    <div class="view">
+      <h2>Ligand <span id="ligand-sub"></span></h2>
+      <div class="viewport" id="v-ligand"></div>
+    </div>
+    <div class="view">
+      <h2>Receptor <span id="receptor-sub"></span></h2>
+      <div class="viewport" id="v-protein"></div>
+    </div>
+    <div class="view">
+      <h2>Complex <span id="complex-sub"></span></h2>
+      <div class="viewport" id="v-complex"></div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="card">
+      <h3>Docking modes</h3>
+      <table>
+        <thead>
+          <tr><th>Mode</th><th>Affinity (kcal/mol)</th><th>RMSD l.b. (Å)</th><th>RMSD u.b. (Å)</th></tr>
+        </thead>
+        <tbody id="scores"></tbody>
+      </table>
+      <p class="hint">Click a row: the ligand and complex views switch to that pose.</p>
+    </div>
+
+    <div class="card">
+      <h3>Load your own files</h3>
+      <div class="file-row">
+        <span class="label">Receptor — .pdb, .pdbqt, .cif, .mol2</span>
+        <input type="file" id="receptor-file" accept=".pdb,.ent,.pdbqt,.cif,.mol2">
+        <span class="picked" id="receptor-name"></span>
+      </div>
+      <div class="file-row">
+        <span class="label">Ligand or Vina output — .pdbqt, .sdf, .mol2, .pdb</span>
+        <input type="file" id="ligand-file" accept=".pdbqt,.sdf,.mol,.mol2,.pdb">
+        <span class="picked" id="ligand-name"></span>
+      </div>
+      <p class="hint">Files are read in the browser and never uploaded. A Vina
+      <code>--out</code> file fills the score table; a plain ligand file shows a
+      single pose.</p>
+    </div>
+
+    <div class="card">
+      <h3>Display</h3>
+      <div class="controls">
+        <label class="ctl"><input type="checkbox" id="surface"> Receptor surface</label>
+        <label class="ctl"><input type="checkbox" id="crystal"> Crystal pose (grey)</label>
+        <label class="ctl"><input type="checkbox" id="spin"> Spin all views</label>
+      </div>
+      <p class="hint">Drag to rotate, scroll to zoom, right-drag to translate.</p>
+    </div>
+  </div>
+</main>
+
+<footer>
+  Built with NGL.js. Structures and scores are embedded in this file;
+  files you load are parsed locally in the browser.
+</footer>
+
+<script>
+const P = window.DockParser;
+const DATA = /*__DATA__*/{};
+
+const stages = {
+  ligand: new NGL.Stage("v-ligand", { backgroundColor: "white", tooltip: true }),
+  receptor: new NGL.Stage("v-protein", { backgroundColor: "white", tooltip: true }),
+  complex: new NGL.Stage("v-complex", { backgroundColor: "white", tooltip: true }),
+};
+
+const state = {
+  receptor: DATA.receptor,
+  receptorLabel: DATA.receptorLabel,
+  poses: DATA.poses,
+  crystal: DATA.crystal,
+  crystalRmsd: DATA.crystalRmsd,
+};
+
+let proteinReps = [];
+let ligandLone = null;
+let ligandInComplex = null;
+let crystalComp = null;
+let focusedOnce = false;
+
+function blob(text) { return new Blob([text], { type: "text/plain" }); }
+function load(stage, text, ext) { return stage.loadFile(blob(text), { ext: ext || "pdb" }); }
+
+function setProtein(keepView) {
+  proteinReps.forEach((comp) => {
+    stages.receptor.removeComponent(comp);
+    stages.complex.removeComponent(comp);
+  });
+  proteinReps = [];
+  return Promise.all([
+    load(stages.receptor, state.receptor.text, state.receptor.ext).then((comp) => {
+      comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.95 });
+      if (!keepView) comp.autoView();
+      proteinReps.push(comp);
+    }),
+    load(stages.complex, state.receptor.text, state.receptor.ext).then((comp) => {
+      comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.55 });
+      proteinReps.push(comp);
+    }),
+  ]);
+}
+
+function showPose(index) {
+  index = Math.max(0, Math.min(index, state.poses.length - 1));
+  document.querySelectorAll("#scores tr").forEach((row, i) => {
+    row.classList.toggle("active", i === index);
+  });
+  const pose = state.poses[index];
+  if (!pose) return;
+
+  if (ligandLone) { stages.ligand.removeComponent(ligandLone); ligandLone = null; }
+  if (ligandInComplex) { stages.complex.removeComponent(ligandInComplex); ligandInComplex = null; }
+
+  load(stages.ligand, pose.pdb, pose.ext).then((comp) => {
+    comp.addRepresentation("ball+stick", { colorScheme: "element", radiusScale: 1.6, aspectRatio: 2.2 });
+    ligandLone = comp;
+    comp.autoView(400);
+  });
+
+  load(stages.complex, pose.pdb, pose.ext).then((comp) => {
+    comp.addRepresentation("ball+stick", { colorScheme: "element", radiusScale: 1.3, aspectRatio: 2.0 });
+    ligandInComplex = comp;
+    if (!focusedOnce) {
+      focusedOnce = true;
+      stages.complex.autoView(0);
+      setTimeout(() => { if (ligandInComplex) ligandInComplex.autoView(500); }, 500);
+    }
+  });
+
+  const score = (pose.affinity === null || pose.affinity === undefined)
+    ? "" : " · " + pose.affinity.toFixed(2) + " kcal/mol";
+  document.getElementById("mode-badge").textContent = "mode " + pose.mode + score;
+  document.getElementById("complex-sub").textContent = "mode " + pose.mode + score;
+  document.getElementById("ligand-sub").textContent = "pose " + pose.mode;
+}
+
+function rebuildTable() {
+  const tbody = document.getElementById("scores");
+  tbody.innerHTML = "";
+  const fmt = (v) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : v.toFixed(2);
+  state.poses.forEach((pose, index) => {
+    const row = document.createElement("tr");
+    row.innerHTML = "<td>" + pose.mode + "</td><td>" + fmt(pose.affinity) + "</td>" +
+      "<td>" + fmt(pose.rmsd_lb) + "</td><td>" + fmt(pose.rmsd_ub) + "</td>";
+    row.addEventListener("click", () => showPose(index));
+    tbody.appendChild(row);
+  });
+  document.getElementById("rmsd-badge").textContent =
+    (state.crystalRmsd === null || state.crystalRmsd === undefined)
+      ? "no reference pose" : "reference RMSD " + state.crystalRmsd + " Å";
+}
+
+function refresh(keepView) {
+  focusedOnce = false;
+  document.getElementById("receptor-sub").textContent = state.receptorLabel;
+  rebuildTable();
+  setProtein(keepView).then(() => {
+    if (crystalComp) { stages.complex.removeComponent(crystalComp); crystalComp = null; }
+    document.getElementById("crystal").checked = false;
+    showPose(0);
+  });
+}
+
+/* ---------------- local files ---------------- */
+
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read " + file.name));
+    reader.readAsText(file);
+  });
+}
+
+document.getElementById("receptor-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const text = await readFile(file);
+  const kind = P.sniff(file.name, text);
+  state.receptor = {
+    text: kind === "pdbqt" ? P.pdbqtToPdb(text) : text,
+    ext: kind === "cif" ? "cif" : (kind === "mol2" ? "mol2" : "pdb"),
+  };
+  state.receptorLabel = file.name;
+  document.getElementById("receptor-name").textContent = file.name;
+  refresh(false);
+});
+
+document.getElementById("ligand-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  const text = await readFile(file);
+  const kind = P.sniff(file.name, text);
+  if (kind === "poses") {
+    const poses = P.parseVinaOut(text);
+    if (!poses.length) { alert("No poses found in " + file.name); return; }
+    state.poses = poses.map((pose) => ({ ...pose, ext: "pdb" }));
+  } else {
+    const ext = kind === "sdf" ? "sdf" : (kind === "mol2" ? "mol2" : "pdb");
+    const pdb = kind === "pdbqt" ? P.pdbqtToPdb(text) : text;
+    state.poses = [{ mode: 1, affinity: null, rmsd_lb: null, rmsd_ub: null, pdb, ext }];
+  }
+  state.crystal = null;
+  state.crystalRmsd = null;
+  document.getElementById("ligand-name").textContent =
+    file.name + " · " + state.poses.length + " pose" + (state.poses.length > 1 ? "s" : "");
+  refresh(false);
+});
+
+/* ---------------- display options ---------------- */
+
+document.getElementById("surface").addEventListener("change", (event) => {
+  proteinReps.forEach((comp) => {
+    if (event.target.checked) {
+      comp.addRepresentation("surface",
+        { colorScheme: "uniform", colorValue: 0xaab4bd, opacity: 0.22, surfaceType: "av" });
+    } else {
+      comp.representations.filter((rep) => rep.type === "surface")
+        .forEach((rep) => comp.removeRepresentation(rep));
+    }
+  });
+});
+
+document.getElementById("crystal").addEventListener("change", (event) => {
+  if (event.target.checked && state.crystal && !crystalComp) {
+    load(stages.complex, state.crystal.text, state.crystal.ext).then((comp) => {
+      comp.addRepresentation("licorice", { colorScheme: "uniform", colorValue: 0x8a8a8a });
+      crystalComp = comp;
+    });
+  } else if (!event.target.checked && crystalComp) {
+    stages.complex.removeComponent(crystalComp);
+    crystalComp = null;
+  }
+});
+
+document.getElementById("spin").addEventListener("change", (event) => {
+  Object.values(stages).forEach((stage) => stage.setSpin(event.target.checked));
+});
+
+window.addEventListener("resize", () => {
+  Object.values(stages).forEach((stage) => stage.handleResize());
+});
+
+document.getElementById("title").textContent = DATA.title;
+document.getElementById("subtitle").textContent = DATA.subtitle;
+rebuildTable();
+setProtein(false).then(() => showPose(0));
+</script>
+</body>
+</html>

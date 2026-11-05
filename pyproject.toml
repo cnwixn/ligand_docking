@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ligand-docking"
+version = "0.1.0"
+description = "Run AutoDock Vina from Python and view the result in a static 3D page"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+rmsd = ["numpy>=1.24"]
+
+[project.scripts]
+ligand-docking = "ligand_docking.cli:main"
+
+[tool.setuptools]
+packages = ["ligand_docking"]
+
+[tool.setuptools.package-data]
+ligand_docking = ["viewer/*.js", "viewer/*.html"]
