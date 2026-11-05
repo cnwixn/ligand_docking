@@ -111,6 +111,8 @@ table.
 
 ## What the page shows
 
+![Docking result viewer](preview.png)
+
 - **Ligand** — the pose on its own, ball and stick by element.
 - **Receptor** — cartoon coloured by secondary structure.
 - **Complex** — the same pose inside the pocket, with the camera framed on the
