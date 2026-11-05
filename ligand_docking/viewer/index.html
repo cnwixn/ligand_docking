@@ -39,13 +39,20 @@
   .view h2 {
     margin: 0; padding: 8px 12px; font-size: 11px; letter-spacing: .08em;
     text-transform: uppercase; color: var(--ink-2); border-bottom: 1px solid var(--line);
-    display: flex; justify-content: space-between; gap: 8px; font-weight: 600;
+    display: flex; align-items: center; gap: 10px; font-weight: 600;
   }
-  .view h2 span { font-weight: 400; text-transform: none; letter-spacing: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .view h2 .meta { flex: 1; text-align: right; font-weight: 400; text-transform: none;
+    letter-spacing: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .mini {
+    font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 600;
+    color: var(--accent); border: 1px solid var(--line); border-radius: 6px;
+    padding: 3px 9px; cursor: pointer; white-space: nowrap; background: #fff;
+  }
+  .mini:hover { background: var(--accent-soft); border-color: var(--accent); }
   .viewport { flex: 1; min-height: 300px; position: relative; }
 
-  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 330px 260px; gap: 12px; padding: 0 14px 12px; }
+  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; padding: 0 14px 12px; }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px;
@@ -89,15 +96,23 @@
 <main>
   <div class="views">
     <div class="view">
-      <h2>Ligand <span id="ligand-sub"></span></h2>
+      <h2>Ligand
+        <span class="meta" id="ligand-sub"></span>
+        <label class="mini">Load ligand<input type="file" id="ligand-file" hidden
+          accept=".pdbqt,.sdf,.mol,.mol2,.pdb"></label>
+      </h2>
       <div class="viewport" id="v-ligand"></div>
     </div>
     <div class="view">
-      <h2>Receptor <span id="receptor-sub"></span></h2>
+      <h2>Receptor
+        <span class="meta" id="receptor-sub"></span>
+        <label class="mini">Load receptor<input type="file" id="receptor-file" hidden
+          accept=".pdb,.ent,.pdbqt,.cif,.mol2"></label>
+      </h2>
       <div class="viewport" id="v-protein"></div>
     </div>
     <div class="view">
-      <h2>Complex <span id="complex-sub"></span></h2>
+      <h2>Complex <span class="meta" id="complex-sub">docked pose</span></h2>
       <div class="viewport" id="v-complex"></div>
     </div>
   </div>
@@ -105,30 +120,17 @@
   <div class="bottom">
     <div class="card">
       <h3>Docking modes</h3>
-      <table>
-        <thead>
-          <tr><th>Mode</th><th>Affinity (kcal/mol)</th><th>RMSD l.b. (Å)</th><th>RMSD u.b. (Å)</th></tr>
-        </thead>
-        <tbody id="scores"></tbody>
-      </table>
-      <p class="hint">Click a row: the ligand and complex views switch to that pose.</p>
-    </div>
-
-    <div class="card">
-      <h3>Load your own files</h3>
-      <div class="file-row">
-        <span class="label">Receptor — .pdb, .pdbqt, .cif, .mol2</span>
-        <input type="file" id="receptor-file" accept=".pdb,.ent,.pdbqt,.cif,.mol2">
-        <span class="picked" id="receptor-name"></span>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Mode</th><th>Affinity (kcal/mol)</th><th>RMSD l.b. (Å)</th><th>RMSD u.b. (Å)</th></tr>
+          </thead>
+          <tbody id="scores"></tbody>
+        </table>
       </div>
-      <div class="file-row">
-        <span class="label">Ligand or Vina output — .pdbqt, .sdf, .mol2, .pdb</span>
-        <input type="file" id="ligand-file" accept=".pdbqt,.sdf,.mol,.mol2,.pdb">
-        <span class="picked" id="ligand-name"></span>
-      </div>
-      <p class="hint">Files are read in the browser and never uploaded. A Vina
-      <code>--out</code> file fills the score table; a plain ligand file shows a
-      single pose.</p>
+      <p class="hint">Click a row: the ligand and complex views switch to that pose.
+      A Vina <code>--out</code> file fills this table; a plain ligand file shows a single pose.
+      Loaded files are read in the browser and never uploaded.</p>
     </div>
 
     <div class="card">
@@ -161,6 +163,7 @@ const stages = {
 const state = {
   receptor: DATA.receptor,
   receptorLabel: DATA.receptorLabel,
+  ligandLabel: null,
   poses: DATA.poses,
   crystal: DATA.crystal,
   crystalRmsd: DATA.crystalRmsd,
@@ -189,6 +192,7 @@ function setProtein(keepView) {
     }),
     load(stages.complex, state.receptor.text, state.receptor.ext).then((comp) => {
       comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.55 });
+      if (!keepView) setTimeout(() => comp.autoView(300), 120);
       proteinReps.push(comp);
     }),
   ]);
@@ -215,18 +219,14 @@ function showPose(index) {
   load(stages.complex, pose.pdb, pose.ext).then((comp) => {
     comp.addRepresentation("ball+stick", { colorScheme: "element", radiusScale: 1.3, aspectRatio: 2.0 });
     ligandInComplex = comp;
-    if (!focusedOnce) {
-      focusedOnce = true;
-      stages.complex.autoView(0);
-      setTimeout(() => { if (ligandInComplex) ligandInComplex.autoView(500); }, 500);
-    }
   });
 
   const score = (pose.affinity === null || pose.affinity === undefined)
     ? "" : " · " + pose.affinity.toFixed(2) + " kcal/mol";
   document.getElementById("mode-badge").textContent = "mode " + pose.mode + score;
   document.getElementById("complex-sub").textContent = "mode " + pose.mode + score;
-  document.getElementById("ligand-sub").textContent = "pose " + pose.mode;
+  document.getElementById("ligand-sub").textContent =
+    (state.ligandLabel ? state.ligandLabel + " · " : "") + "pose " + pose.mode;
 }
 
 function rebuildTable() {
@@ -277,7 +277,6 @@ document.getElementById("receptor-file").addEventListener("change", async (event
     ext: kind === "cif" ? "cif" : (kind === "mol2" ? "mol2" : "pdb"),
   };
   state.receptorLabel = file.name;
-  document.getElementById("receptor-name").textContent = file.name;
   refresh(false);
 });
 
@@ -297,8 +296,7 @@ document.getElementById("ligand-file").addEventListener("change", async (event) 
   }
   state.crystal = null;
   state.crystalRmsd = null;
-  document.getElementById("ligand-name").textContent =
-    file.name + " · " + state.poses.length + " pose" + (state.poses.length > 1 ? "s" : "");
+  state.ligandLabel = file.name;
   refresh(false);
 });
 
@@ -346,11 +344,10 @@ if (window.ResizeObserver) {
 
 document.getElementById("title").textContent = DATA.title;
 document.getElementById("subtitle").textContent = DATA.subtitle;
-rebuildTable();
 // let the grid settle before NGL measures the containers
 setTimeout(() => {
   Object.values(stages).forEach((stage) => stage.handleResize());
-  setProtein(false).then(() => showPose(0));
+  refresh(false);
 }, 60);
 </script>
 </body>
