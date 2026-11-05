@@ -90,7 +90,7 @@ ligand-docking view --receptor examples/1iep/receptor.pdb \
     -o out/1iep.html --open
 
 ligand-docking view --receptor examples/1s63/receptor.pdb \
-    --poses examples/1s63/vina_out.pdbqt --crystal examples/1s63/ligand.sdf \
+    --poses examples/1s63/vina_out.pdbqt --crystal examples/1s63/ligand.pdbqt \
     -o out/1s63.html --open
 ```
 
