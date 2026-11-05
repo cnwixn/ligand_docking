@@ -41,12 +41,69 @@ def _load_poses(poses: str | Path | list[Pose]) -> list[Pose]:
     return [Pose(mode=1, affinity=None, rmsd_lb=None, rmsd_ub=None, pdb=text)]
 
 
+def viewer_payload(
+    receptor: str | Path,
+    poses: str | Path | list[Pose],
+    *,
+    title: str = "",
+    subtitle: str = "",
+    crystal: str | Path | None = None,
+    receptor_label: str | None = None,
+    ligand_label: str | None = None,
+    server_mode: bool = False,
+) -> dict:
+    """Everything the page needs, as plain data (used by the builder and the server)."""
+    receptor_path = Path(receptor).expanduser().resolve() if isinstance(receptor, (str, Path)) else None
+    if receptor_path is not None:
+        if not receptor_path.is_file():
+            raise FileNotFoundError(receptor_path)
+        receptor_text, receptor_ext = _structure(receptor_path)
+        receptor_name = receptor_path.name
+    else:
+        raise TypeError("receptor must be a path to a structure file")
+
+    pose_list = _load_poses(poses)
+    if not pose_list:
+        raise ValueError("No poses found in the given file.")
+
+    if not ligand_label:
+        if isinstance(poses, (str, Path)):
+            ligand_label = Path(poses).name
+        else:
+            ligand_label = "ligand"
+
+    payload: dict = {
+        "title": title or f"{Path(ligand_label).stem} docked into {receptor_path.stem}",
+        "subtitle": subtitle,
+        "receptor": {"text": receptor_text, "ext": receptor_ext},
+        "receptorLabel": receptor_label or receptor_name,
+        "ligandLabel": ligand_label,
+        "poses": [{**pose.as_dict(), "ext": "pdb"} for pose in pose_list],
+        "crystal": None,
+        "crystalRmsd": None,
+        "serverMode": bool(server_mode),
+    }
+
+    if crystal:
+        crystal_path = Path(crystal).expanduser().resolve()
+        crystal_text, crystal_ext = _structure(crystal_path)
+        payload["crystal"] = {"text": crystal_text, "ext": crystal_ext}
+        payload["crystalRmsd"] = rmsd_to_reference(pose_list[0].pdb, crystal_text)
+
+    return payload
+
+
+def render_html(payload: dict) -> str:
+    template = (ASSETS / "index.html").read_text(encoding="utf-8")
+    return template.replace("/*__DATA__*/{}", json.dumps(payload))
+
+
 def build_viewer(
     receptor: str | Path,
     poses: str | Path | list[Pose],
     out_html: str | Path,
     *,
-    title: str = "Docking result",
+    title: str = "",
     subtitle: str = "",
     crystal: str | Path | None = None,
     receptor_label: str | None = None,
@@ -58,37 +115,14 @@ def build_viewer(
     ``crystal`` is an optional reference ligand used for the RMSD badge and the
     grey overlay.
     """
-    receptor_path = Path(receptor).expanduser().resolve()
-    if not receptor_path.is_file():
-        raise FileNotFoundError(receptor_path)
-    receptor_text, receptor_ext = _structure(receptor_path)
-
-    pose_list = _load_poses(poses)
-    if not pose_list:
-        raise ValueError("No poses found in the given file.")
-
-    payload: dict = {
-        "title": title,
-        "subtitle": subtitle or receptor_path.name,
-        "receptor": {"text": receptor_text, "ext": receptor_ext},
-        "receptorLabel": receptor_label or receptor_path.name,
-        "poses": [{**pose.as_dict(), "ext": "pdb"} for pose in pose_list],
-        "crystal": None,
-        "crystalRmsd": None,
-    }
-
-    if crystal:
-        crystal_path = Path(crystal).expanduser().resolve()
-        crystal_text, crystal_ext = _structure(crystal_path)
-        payload["crystal"] = {"text": crystal_text, "ext": crystal_ext}
-        payload["crystalRmsd"] = rmsd_to_reference(pose_list[0].pdb, crystal_text)
+    payload = viewer_payload(
+        receptor, poses, title=title, subtitle=subtitle, crystal=crystal,
+        receptor_label=receptor_label,
+    )
 
     target = Path(out_html).expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     for name in ASSET_FILES:
         shutil.copy2(ASSETS / name, target.parent / name)
-
-    template = (ASSETS / "index.html").read_text(encoding="utf-8")
-    html = template.replace("/*__DATA__*/{}", json.dumps(payload))
-    target.write_text(html, encoding="utf-8")
+    target.write_text(render_html(payload), encoding="utf-8")
     return target

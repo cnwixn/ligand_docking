@@ -53,6 +53,20 @@
   .viewport { flex: 1; min-height: 300px; position: relative; }
 
   .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; padding: 0 14px 12px; }
+  .bottom.with-run { grid-template-columns: minmax(0, 1fr) 300px 300px; }
+  .run-grid { display: grid; grid-template-columns: 62px 1fr 1fr 1fr; gap: 6px 8px; align-items: center; }
+  .run-grid .lbl { font-size: 11px; color: var(--ink-2); }
+  .run-grid input { width: 100%; padding: 4px 6px; border: 1px solid var(--line);
+    border-radius: 6px; font-size: 12px; }
+  .run-files { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+  .run-files input[type=file] { font-size: 11px; }
+  button.run {
+    width: 100%; margin-top: 10px; padding: 8px 10px; border: 0; border-radius: 7px;
+    background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button.run:disabled { opacity: .55; cursor: progress; }
+  .run-status { font-size: 11px; color: var(--ink-2); margin-top: 6px; min-height: 15px; }
+  .run-status.bad { color: #b3261e; }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px;
@@ -117,7 +131,7 @@
     </div>
   </div>
 
-  <div class="bottom">
+  <div class="bottom" id="bottom">
     <div class="card">
       <h3>Docking modes</h3>
       <div class="table-scroll">
@@ -131,6 +145,28 @@
       <p class="hint">Click a row: the ligand and complex views switch to that pose.
       A Vina <code>--out</code> file fills this table; a plain ligand file shows a single pose.
       Loaded files are read in the browser and never uploaded.</p>
+    </div>
+
+    <div class="card" id="run-card" style="display:none">
+      <h3>Run docking</h3>
+      <div class="run-files">
+        <input type="file" id="run-receptor" accept=".pdbqt">
+        <input type="file" id="run-ligand" accept=".pdbqt">
+      </div>
+      <div class="run-grid">
+        <span class="lbl">centre</span>
+        <input type="text" id="run-cx" placeholder="x">
+        <input type="text" id="run-cy" placeholder="y">
+        <input type="text" id="run-cz" placeholder="z">
+        <span class="lbl">size</span>
+        <input type="text" id="run-sx" placeholder="20">
+        <input type="text" id="run-sy" placeholder="20">
+        <input type="text" id="run-sz" placeholder="20">
+        <span class="lbl">effort</span>
+        <input type="text" id="run-ex" placeholder="32" style="grid-column: span 3">
+      </div>
+      <button class="run" id="run-btn">Run Vina</button>
+      <div class="run-status" id="run-status"></div>
     </div>
 
     <div class="card">
@@ -163,7 +199,7 @@ const stages = {
 const state = {
   receptor: DATA.receptor,
   receptorLabel: DATA.receptorLabel,
-  ligandLabel: null,
+  ligandLabel: DATA.ligandLabel || null,
   poses: DATA.poses,
   crystal: DATA.crystal,
   crystalRmsd: DATA.crystalRmsd,
@@ -187,13 +223,13 @@ function setProtein(keepView) {
   return Promise.all([
     load(stages.receptor, state.receptor.text, state.receptor.ext).then((comp) => {
       comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.95 });
-      if (!keepView) comp.autoView();
       proteinReps.push(comp);
+      if (!keepView) setTimeout(() => stages.receptor.autoView(300), 150);
     }),
     load(stages.complex, state.receptor.text, state.receptor.ext).then((comp) => {
       comp.addRepresentation("cartoon", { colorScheme: "sstruc", opacity: 0.55 });
-      if (!keepView) setTimeout(() => comp.autoView(300), 120);
       proteinReps.push(comp);
+      if (!keepView) setTimeout(() => stages.complex.autoView(300), 150);
     }),
   ]);
 }
@@ -342,8 +378,86 @@ if (window.ResizeObserver) {
   document.querySelectorAll(".viewport").forEach((node) => observer.observe(node));
 }
 
+/* ---------------- run docking (only when served by `ligand-docking serve`) ---------------- */
+
+if (DATA.serverMode) {
+  document.getElementById("run-card").style.display = "";
+  document.getElementById("bottom").classList.add("with-run");
+}
+
+function runStatus(text, bad) {
+  const node = document.getElementById("run-status");
+  node.textContent = text || "";
+  node.className = "run-status" + (bad ? " bad" : "");
+}
+
+function readBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      }
+      resolve(btoa(binary));
+    };
+    reader.onerror = () => reject(new Error("Could not read " + file.name));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+document.getElementById("run-btn").addEventListener("click", async () => {
+  const receptorFile = document.getElementById("run-receptor").files[0];
+  const ligandFile = document.getElementById("run-ligand").files[0];
+  if (!receptorFile || !ligandFile) {
+    runStatus("Choose a receptor PDBQT and a ligand PDBQT first.", true);
+    return;
+  }
+  const value = (id) => document.getElementById(id).value.trim();
+  const button = document.getElementById("run-btn");
+  button.disabled = true;
+  runStatus("Running Vina...");
+  try {
+    const payload = {
+      receptor_name: receptorFile.name,
+      receptor_b64: await readBase64(receptorFile),
+      ligand_name: ligandFile.name,
+      ligand_b64: await readBase64(ligandFile),
+      center: [value("run-cx"), value("run-cy"), value("run-cz")].map(Number),
+      size: [value("run-sx"), value("run-sy"), value("run-sz")].map(Number),
+      exhaustiveness: Number(value("run-ex") || 32),
+    };
+    const response = await fetch("/api/dock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!data.ok) {
+      runStatus(data.error || "Vina failed.", true);
+      return;
+    }
+    state.poses = data.poses.map((pose) => ({ ...pose, ext: "pdb" }));
+    state.ligandLabel = data.ligand_name;
+    state.crystal = null;
+    state.crystalRmsd = null;
+    rebuildTable();
+    showPose(0);
+    runStatus("Done: " + state.poses.length + " poses, best " +
+      data.poses[0].affinity.toFixed(2) + " kcal/mol.");
+  } catch (err) {
+    runStatus(String(err), true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 document.getElementById("title").textContent = DATA.title;
-document.getElementById("subtitle").textContent = DATA.subtitle;
+const subtitleNode = document.getElementById("subtitle");
+subtitleNode.textContent = DATA.subtitle || "";
+subtitleNode.hidden = !DATA.subtitle;
+document.getElementById("ligand-sub").textContent = state.ligandLabel || "";
 // let the grid settle before NGL measures the containers
 setTimeout(() => {
   Object.values(stages).forEach((stage) => stage.handleResize());

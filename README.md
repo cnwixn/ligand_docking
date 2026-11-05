@@ -98,6 +98,33 @@ ligand-docking dock --receptor receptor.pdbqt --ligand ligand.pdbqt \
 | `--crystal` | none | reference ligand for the RMSD badge |
 | `--open` | off | open the viewer when it is written |
 
+## Run a docking from the browser
+
+A static page cannot start a program, so `serve` starts a small local server
+(loopback only) and the page gains a **Run docking** panel:
+
+```
+ligand-docking serve --receptor receptor.pdb --poses run_out.pdbqt --open
+```
+
+Then, on the page: choose a receptor PDBQT and a ligand PDBQT, type the box
+centre and size, press **Run Vina**. The poses and the score table are replaced
+with the new result; nothing is uploaded anywhere, the files go from your browser
+to the local server on 127.0.0.1.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--receptor`, `--poses` | required | what the page shows first |
+| `--crystal` | none | reference ligand for the RMSD badge |
+| `--title`, `--subtitle` | from file names | header text |
+| `--port`, `--host` | `8766`, `127.0.0.1` | where the server listens |
+| `--workdir` | `./.ligand-docking-tmp` | run folders for the docking jobs |
+| `--vina` | bundled binary | path to the Vina executable |
+| `--open` | off | open the page when the server is ready |
+
+The work folder has to be writable by the Vina process, which is why it defaults
+to the current directory rather than the system temp folder.
+
 ## View an existing run
 
 ```

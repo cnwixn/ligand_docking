@@ -9,7 +9,8 @@ from pathlib import Path
 
 from .dock import VinaNotFound, find_vina, run_vina
 from .pdbqt import read_poses
-from .report import build_viewer
+from .report import build_viewer, viewer_payload
+from .serve import run_server
 
 
 def _print_summary(result: dict) -> None:
@@ -51,7 +52,7 @@ def cmd_dock(args: argparse.Namespace) -> int:
             args.receptor,
             result["poses"],
             args.html,
-            title=args.title or Path(args.receptor).stem,
+            title=args.title or "",
             subtitle="AutoDock Vina docking result",
             crystal=args.crystal,
         )
@@ -67,7 +68,7 @@ def cmd_view(args: argparse.Namespace) -> int:
             args.receptor,
             args.poses,
             args.out,
-            title=args.title or Path(args.receptor).stem,
+            title=args.title or "",
             subtitle=args.subtitle or "",
             crystal=args.crystal,
         )
@@ -122,11 +123,42 @@ def build_parser() -> argparse.ArgumentParser:
     view.add_argument("--open", action="store_true", help="open the page when it is ready")
     view.set_defaults(func=cmd_view)
 
+    serve = sub.add_parser("serve", help="serve the viewer locally so its Run button can dock")
+    serve.add_argument("--receptor", required=True, help="receptor .pdb / .pdbqt")
+    serve.add_argument("--poses", required=True, help="poses to show first (Vina out or a ligand file)")
+    serve.add_argument("--crystal", help="reference ligand for the RMSD badge")
+    serve.add_argument("--title", help="page title (default: built from the file names)")
+    serve.add_argument("--subtitle", help="line under the title")
+    serve.add_argument("--port", type=int, default=8766)
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--vina", help="path to the Vina executable")
+    serve.add_argument("--workdir", help="where run folders are written (default: ./.ligand-docking-tmp)")
+    serve.add_argument("--open", action="store_true", help="open the page when the server is up")
+    serve.set_defaults(func=cmd_serve)
+
     version = sub.add_parser("vina", help="print the Vina executable that will be used")
     version.add_argument("--vina", help="path to check instead of the automatic search")
     version.set_defaults(func=cmd_vina)
 
     return parser
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    try:
+        page = viewer_payload(
+            args.receptor,
+            args.poses,
+            title=args.title or "",
+            subtitle=args.subtitle or "",
+            crystal=args.crystal,
+            server_mode=True,
+        )
+    except (FileNotFoundError, ValueError, TypeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    run_server(page, host=args.host, port=args.port, vina=args.vina,
+               open_browser=args.open, workdir=args.workdir)
+    return 0
 
 
 def cmd_vina(args: argparse.Namespace) -> int:
