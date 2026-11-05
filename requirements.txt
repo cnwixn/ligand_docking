@@ -1,2 +1,5 @@
-# numpy is only needed for the RMSD badge; the viewer itself is dependency free
+﻿# numpy is only needed for the RMSD badge; the viewer itself is dependency free
 numpy>=1.24
+
+# only needed to convert .pdb / .sdf / .mol / .mol2 into PDBQT
+# (pip install meeko rdkit gemmi)

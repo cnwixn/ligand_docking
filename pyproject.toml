@@ -1,10 +1,10 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ligand-docking"
-version = "0.1.0"
+version = "0.2.0"
 description = "Run AutoDock Vina from Python and view the result in a static 3D page"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -13,6 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 rmsd = ["numpy>=1.24"]
+prep = ["meeko>=0.5", "rdkit", "gemmi"]
 
 [project.scripts]
 ligand-docking = "ligand_docking.cli:main"

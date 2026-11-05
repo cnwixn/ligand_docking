@@ -55,11 +55,21 @@ Gatekeeper refuses to start them.
 
 ## Prepare the inputs
 
-Both files must be PDBQT. [Meeko](https://meeko.readthedocs.io/) is the official
-Python tool for that:
+The Run panel accepts ordinary files and converts them for you: a receptor
+`.pdb` (or `.cif`) and a ligand `.sdf`, `.mol` or `.mol2`. The conversion uses
+[Meeko](https://meeko.readthedocs.io/), the Forli lab's Python preparation tool:
 
 ```
-pip install meeko rdkit
+pip install meeko rdkit gemmi      # or: pip install -e .[prep]
+```
+
+If Meeko is not installed, the page says so instead of failing silently. Residues
+whose backbone is incomplete are dropped before conversion, and the run reports
+which ones.
+
+Vina itself still needs PDBQT, so the command line path wants prepared files:
+
+```
 mk_prepare_receptor.py --read_pdb protein.pdb -o receptor -p -v \
     --box_size 20 20 20 --box_center 15.19 53.90 16.92
 mk_prepare_ligand.py -i ligand.sdf -o ligand.pdbqt
@@ -107,10 +117,17 @@ A static page cannot start a program, so `serve` starts a small local server
 ligand-docking serve --receptor receptor.pdb --poses run_out.pdbqt --open
 ```
 
-Then, on the page: choose a receptor PDBQT and a ligand PDBQT, type the box
-centre and size, press **Run Vina**. The poses and the score table are replaced
-with the new result; nothing is uploaded anywhere, the files go from your browser
-to the local server on 127.0.0.1.
+Then, on the page: choose a receptor (`.pdb`, `.pdbqt`) and a ligand (`.pdbqt`,
+`.sdf`, `.mol`, `.mol2`), press **Run Vina**. PDB and SDF are converted to PDBQT
+first, so no separate preparation step is needed. The poses and the score table
+are replaced with the new result; nothing is uploaded anywhere, the files go from
+your browser to the local server on 127.0.0.1.
+
+The box is filled in for you from a pose that already sits in the pocket (the
+reference pose if there is one, otherwise the first docked pose): **centre** is
+its centroid, **size** is its extent plus 12 Å, never smaller than 18 Å.
+**effort** starts at 8 — enough for a quick look; raise it to 32–64 for a run
+worth keeping.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

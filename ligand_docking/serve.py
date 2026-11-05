@@ -19,6 +19,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .dock import VinaNotFound, run_vina
+from .pdbqt import pdbqt_to_pdb
+from .prep import PrepError, prepare_ligand, prepare_receptor
 from .report import ASSETS, render_html
 
 LOCK = threading.Lock()
@@ -111,10 +113,16 @@ class DockingHandler(BaseHTTPRequestHandler):
 
         work = self.work_root / f"run-{uuid.uuid4().hex[:10]}"
         work.mkdir(parents=True, exist_ok=True)
-        receptor = work / Path(body.get("receptor_name") or "receptor.pdbqt").name
-        ligand = work / Path(body.get("ligand_name") or "ligand.pdbqt").name
-        receptor.write_bytes(base64.b64decode(receptor_b64))
-        ligand.write_bytes(base64.b64decode(ligand_b64))
+        receptor_raw = work / Path(body.get("receptor_name") or "receptor.pdbqt").name
+        ligand_raw = work / Path(body.get("ligand_name") or "ligand.pdbqt").name
+        receptor_raw.write_bytes(base64.b64decode(receptor_b64))
+        ligand_raw.write_bytes(base64.b64decode(ligand_b64))
+
+        try:
+            receptor = prepare_receptor(receptor_raw, work / "receptor.pdbqt")["pdbqt"]
+            ligand = prepare_ligand(ligand_raw, work / "ligand.pdbqt")["pdbqt"]
+        except PrepError as exc:
+            raise ValueError(str(exc)) from None
 
         with LOCK:
             outcome = run_vina(receptor, ligand, work / "out.pdbqt",
@@ -122,9 +130,11 @@ class DockingHandler(BaseHTTPRequestHandler):
                                vina=self.vina_path)
 
         poses = outcome["poses"]
+        receptor_pdb = pdbqt_to_pdb(receptor.read_text(encoding="utf-8", errors="ignore"))
         return {
             "ok": True,
             "ligand_name": ligand.name,
+            "receptor_pdb": receptor_pdb,
             "poses": [pose.as_dict() for pose in poses],
             "log": outcome["log"][-4000:],
         }

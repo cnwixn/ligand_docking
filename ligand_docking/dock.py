@@ -76,6 +76,26 @@ def find_vina(explicit: str | Path | None = None) -> Path:
     )
 
 
+def vina_version(vina: str | Path | None = None) -> str | None:
+    """Return the version string of the Vina binary, e.g. ``1.2.7``."""
+    try:
+        exe = find_vina(vina)
+    except VinaNotFound:
+        return None
+    try:
+        result = subprocess.run([str(exe), "--version"], capture_output=True,
+                                text=True, timeout=60)
+    except OSError:
+        return None
+    text = f"{result.stdout or ''} {result.stderr or ''}"
+    for token in text.replace("\n", " ").split():
+        if token.startswith("v") and token[1:2].isdigit():
+            return token[1:]
+        if token[:1].isdigit() and token.count(".") >= 1:
+            return token
+    return None
+
+
 def run_vina(
     receptor: str | Path,
     ligand: str | Path,

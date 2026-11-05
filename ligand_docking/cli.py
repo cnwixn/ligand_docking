@@ -7,10 +7,16 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from .dock import VinaNotFound, find_vina, run_vina
+from .dock import VinaNotFound, find_vina, run_vina, vina_version
 from .pdbqt import read_poses
 from .report import build_viewer, viewer_payload
 from .serve import run_server
+
+
+def default_subtitle() -> str:
+    """The line under the title: which Vina build produced the poses."""
+    version = vina_version()
+    return f"AutoDock Vina {version}" if version else "AutoDock Vina"
 
 
 def _print_summary(result: dict) -> None:
@@ -69,7 +75,7 @@ def cmd_view(args: argparse.Namespace) -> int:
             args.poses,
             args.out,
             title=args.title or "",
-            subtitle=args.subtitle or "",
+            subtitle=args.subtitle or default_subtitle(),
             crystal=args.crystal,
         )
     except (FileNotFoundError, ValueError) as exc:
@@ -149,7 +155,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             args.receptor,
             args.poses,
             title=args.title or "",
-            subtitle=args.subtitle or "",
+            subtitle=args.subtitle or default_subtitle(),
             crystal=args.crystal,
             server_mode=True,
         )

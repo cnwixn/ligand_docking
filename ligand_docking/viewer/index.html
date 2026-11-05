@@ -118,7 +118,7 @@
     <div class="view">
       <h2>Ligand
         <span class="meta" id="ligand-sub"></span>
-        <label class="mini">Load ligand<input type="file" id="ligand-file" hidden
+        <label class="mini">View ligand&#8230;<input type="file" id="ligand-file" hidden
           accept=".pdbqt,.sdf,.mol,.mol2,.pdb"></label>
       </h2>
       <div class="viewport" id="v-ligand"></div>
@@ -126,7 +126,7 @@
     <div class="view">
       <h2>Receptor
         <span class="meta" id="receptor-sub"></span>
-        <label class="mini">Load receptor<input type="file" id="receptor-file" hidden
+        <label class="mini">View receptor&#8230;<input type="file" id="receptor-file" hidden
           accept=".pdb,.ent,.pdbqt,.cif,.mol2"></label>
       </h2>
       <div class="viewport" id="v-protein"></div>
@@ -156,11 +156,11 @@
     <div class="card" id="run-card" style="display:none">
       <h3>Run docking</h3>
       <div class="run-files">
-        <label class="lbl">Receptor (.pdbqt)
-          <input type="file" id="run-receptor" accept=".pdbqt">
+        <label class="lbl">Docking receptor — .pdbqt, .pdb (converted for you)
+          <input type="file" id="run-receptor" accept=".pdbqt,.pdb,.ent">
         </label>
-        <label class="lbl">Ligand (.pdbqt)
-          <input type="file" id="run-ligand" accept=".pdbqt">
+        <label class="lbl">Docking ligand — .pdbqt, .sdf, .mol, .mol2 (converted for you)
+          <input type="file" id="run-ligand" accept=".pdbqt,.sdf,.mol,.mol2">
         </label>
       </div>
       <div class="run-grid">
@@ -173,7 +173,7 @@
         <input type="text" id="run-sy" placeholder="20">
         <input type="text" id="run-sz" placeholder="20">
         <span class="lbl" title="Vina exhaustiveness: higher is slower and more reliable">effort</span>
-        <input type="text" id="run-ex" placeholder="32" style="grid-column: span 3">
+        <input type="text" id="run-ex" value="8" style="grid-column: span 3">
       </div>
       <p class="run-help">
         <b>centre</b> = where the box sits (Å). <b>size</b> = how big the box is (Å);
@@ -407,6 +407,44 @@ if (window.ResizeObserver) {
   document.querySelectorAll(".viewport").forEach((node) => observer.observe(node));
 }
 
+function pdbPoints(text) {
+  const points = [];
+  for (const line of String(text || "").split("\n")) {
+    if (line.startsWith("ATOM") || line.startsWith("HETATM")) {
+      const x = parseFloat(line.slice(30, 38));
+      const y = parseFloat(line.slice(38, 46));
+      const z = parseFloat(line.slice(46, 54));
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) points.push([x, y, z]);
+    }
+  }
+  return points;
+}
+
+/* centre and size are pre-filled from a pose that already sits in the pocket */
+function prefillBox() {
+  const source = (state.crystal && state.crystal.text) || (state.poses[0] && state.poses[0].pdb);
+  const points = pdbPoints(source);
+  if (!points.length) return;
+  const low = [Infinity, Infinity, Infinity];
+  const high = [-Infinity, -Infinity, -Infinity];
+  const sum = [0, 0, 0];
+  for (const point of points) {
+    for (let i = 0; i < 3; i += 1) {
+      sum[i] += point[i];
+      if (point[i] < low[i]) low[i] = point[i];
+      if (point[i] > high[i]) high[i] = point[i];
+    }
+  }
+  const centre = sum.map((value) => (value / points.length).toFixed(2));
+  const size = [0, 1, 2].map((i) => Math.max(18, (high[i] - low[i]) + 12).toFixed(1));
+  const fill = (id, value) => {
+    const node = document.getElementById(id);
+    if (node && !node.value.trim()) node.value = value;
+  };
+  fill("run-cx", centre[0]); fill("run-cy", centre[1]); fill("run-cz", centre[2]);
+  fill("run-sx", size[0]); fill("run-sy", size[1]); fill("run-sz", size[2]);
+}
+
 /* ---------------- run docking (only when served by `ligand-docking serve`) ---------------- */
 
 if (DATA.serverMode) {
@@ -471,8 +509,13 @@ document.getElementById("run-btn").addEventListener("click", async () => {
     state.ligandLabel = data.ligand_name;
     state.crystal = null;
     state.crystalRmsd = null;
+    if (data.receptor_pdb) {
+      state.receptor = { text: data.receptor_pdb, ext: "pdb" };
+      await setProtein(false);
+    }
     rebuildTable();
     showPose(0);
+    prefillBox();
     runStatus("Done: " + state.poses.length + " poses, best " +
       data.poses[0].affinity.toFixed(2) + " kcal/mol.");
   } catch (err) {
@@ -491,6 +534,7 @@ document.getElementById("ligand-sub").textContent = state.ligandLabel || "";
 setTimeout(() => {
   Object.values(stages).forEach((stage) => stage.handleResize());
   refresh(false);
+  prefillBox();
 }, 60);
 </script>
 </body>
