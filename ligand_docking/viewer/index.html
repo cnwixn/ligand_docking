@@ -30,8 +30,8 @@
   }
   .badge.good { background: #e6f4ec; color: var(--good); }
 
-  main { flex: 1; display: grid; grid-template-rows: minmax(280px, 1fr) auto; min-height: 0; }
-  .views { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 12px; min-height: 0; }
+  main { flex: 1; display: grid; grid-template-rows: minmax(360px, 1fr) auto; min-height: 0; }
+  .views { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 14px; min-height: 0; }
   .view {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     display: flex; flex-direction: column; overflow: hidden; min-height: 0;
@@ -43,19 +43,20 @@
   }
   .view h2 span { font-weight: 400; text-transform: none; letter-spacing: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .viewport { flex: 1; min-height: 220px; position: relative; }
+  .viewport { flex: 1; min-height: 300px; position: relative; }
 
-  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 360px 300px; gap: 12px; padding: 0 12px 12px; }
+  .bottom { display: grid; grid-template-columns: minmax(0, 1fr) 330px 260px; gap: 12px; padding: 0 14px 12px; }
   .card {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px 14px;
+    padding: 10px 14px;
   }
   .card h3 {
-    margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    margin: 0 0 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
     color: var(--ink-2);
   }
+  .table-scroll { max-height: 150px; overflow: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { padding: 5px 8px; text-align: right; }
+  th, td { padding: 4px 8px; text-align: right; }
   th { font-size: 11px; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--line); }
   th:first-child, td:first-child { text-align: left; }
   tbody tr { cursor: pointer; border-bottom: 1px solid #eef2f5; }
@@ -207,7 +208,8 @@ function showPose(index) {
   load(stages.ligand, pose.pdb, pose.ext).then((comp) => {
     comp.addRepresentation("ball+stick", { colorScheme: "element", radiusScale: 1.6, aspectRatio: 2.2 });
     ligandLone = comp;
-    comp.autoView(400);
+    stages.ligand.autoView(0);                       // fit the stage right away
+    setTimeout(() => { if (ligandLone === comp) comp.autoView(400); }, 300);
   });
 
   load(stages.complex, pose.pdb, pose.ext).then((comp) => {
@@ -334,10 +336,22 @@ window.addEventListener("resize", () => {
   Object.values(stages).forEach((stage) => stage.handleResize());
 });
 
+/* keep the WebGL canvases in step with their grid cells */
+if (window.ResizeObserver) {
+  const observer = new ResizeObserver(() => {
+    Object.values(stages).forEach((stage) => stage.handleResize());
+  });
+  document.querySelectorAll(".viewport").forEach((node) => observer.observe(node));
+}
+
 document.getElementById("title").textContent = DATA.title;
 document.getElementById("subtitle").textContent = DATA.subtitle;
 rebuildTable();
-setProtein(false).then(() => showPose(0));
+// let the grid settle before NGL measures the containers
+setTimeout(() => {
+  Object.values(stages).forEach((stage) => stage.handleResize());
+  setProtein(false).then(() => showPose(0));
+}, 60);
 </script>
 </body>
 </html>
